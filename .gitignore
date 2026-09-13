@@ -1,0 +1,20 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Logs
+*.log
+
+# Configuracion local sensible (credenciales reales)
+application-local.yml
+application-secrets.yml
+*.env
+
+# Sistema operativo
+.DS_Store
+Thumbs.db

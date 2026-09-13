@@ -1,0 +1,31 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ms-pedidos360-bff
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Emisor de Azure AD (Entra External ID). Reemplazar <TENANT_ID> por el tenant real.
+          issuer-uri: https://login.microsoftonline.com/${AZURE_TENANT_ID:CHANGE_ME}/v2.0
+          # Audience esperado del token (Application ID URI de la App Registration "Pedidos360")
+          audiences: api://${AZURE_API_CLIENT_ID:CHANGE_ME}
+
+pedidos360:
+  downstream:
+    orders-url: ${ORDERS_SERVICE_URL:http://localhost:8081}
+    catalog-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
+    audit-url: ${AUDIT_SERVICE_URL:http://localhost:8084}
+    report-url: ${REPORT_SERVICE_URL:http://localhost:8085}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
