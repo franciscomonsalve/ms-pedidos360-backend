@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 8081
 
 spring:
@@ -12,8 +12,8 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: https://login.microsoftonline.com/${AZURE_TENANT_ID:CHANGE_ME}/v2.0
-          audiences: api://${AZURE_API_CLIENT_ID:CHANGE_ME}
+          issuer-uri: https://login.microsoftonline.com/${AZURE_TENANT_ID:f280f365-653c-4282-b1ee-200e91b01736}/v2.0
+          audiences: ${AZURE_API_CLIENT_ID:08c770a5-21a6-4434-8d59-28723c7c759d}
 
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
@@ -74,3 +74,4 @@ spring:
     hibernate:
       ddl-auto: validate
     show-sql: false
+

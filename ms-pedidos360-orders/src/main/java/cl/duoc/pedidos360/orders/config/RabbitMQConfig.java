@@ -62,33 +62,33 @@ public class RabbitMQConfig {
     public Queue invoiceDlq() { return QueueBuilder.durable(Q_INVOICE + ".dlq").build(); }
 
     @Bean
-    public Binding emailBinding(Queue emailQueue, DirectExchange cmdDirectExchange) {
-        return BindingBuilder.bind(emailQueue).to(cmdDirectExchange).with("email.send");
+    public Binding emailBinding() {
+        return BindingBuilder.bind(emailQueue()).to(cmdDirectExchange()).with("email.send");
     }
 
     @Bean
-    public Binding kitchenBinding(Queue kitchenQueue, DirectExchange cmdDirectExchange) {
-        return BindingBuilder.bind(kitchenQueue).to(cmdDirectExchange).with("kitchen.ticket");
+    public Binding kitchenBinding() {
+        return BindingBuilder.bind(kitchenQueue()).to(cmdDirectExchange()).with("kitchen.ticket");
     }
 
     @Bean
-    public Binding invoiceBinding(Queue invoiceQueue, DirectExchange cmdDirectExchange) {
-        return BindingBuilder.bind(invoiceQueue).to(cmdDirectExchange).with("invoice.gen");
+    public Binding invoiceBinding() {
+        return BindingBuilder.bind(invoiceQueue()).to(cmdDirectExchange()).with("invoice.gen");
     }
 
     @Bean
-    public Binding emailDlqBinding(Queue emailDlq, DirectExchange cmdDeadLetterExchange) {
-        return BindingBuilder.bind(emailDlq).to(cmdDeadLetterExchange).with("email.send");
+    public Binding emailDlqBinding() {
+        return BindingBuilder.bind(emailDlq()).to(cmdDeadLetterExchange()).with("email.send");
     }
 
     @Bean
-    public Binding kitchenDlqBinding(Queue kitchenDlq, DirectExchange cmdDeadLetterExchange) {
-        return BindingBuilder.bind(kitchenDlq).to(cmdDeadLetterExchange).with("kitchen.ticket");
+    public Binding kitchenDlqBinding() {
+        return BindingBuilder.bind(kitchenDlq()).to(cmdDeadLetterExchange()).with("kitchen.ticket");
     }
 
     @Bean
-    public Binding invoiceDlqBinding(Queue invoiceDlq, DirectExchange cmdDeadLetterExchange) {
-        return BindingBuilder.bind(invoiceDlq).to(cmdDeadLetterExchange).with("invoice.gen");
+    public Binding invoiceDlqBinding() {
+        return BindingBuilder.bind(invoiceDlq()).to(cmdDeadLetterExchange()).with("invoice.gen");
     }
 
     @Bean

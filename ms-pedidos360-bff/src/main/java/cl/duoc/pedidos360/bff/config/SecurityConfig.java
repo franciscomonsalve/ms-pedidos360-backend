@@ -11,25 +11,23 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtDecoders;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 
 /**
  * Configura la validacion del JWT emitido por Azure AD (IDaaS) en el BFF.
- *
- * Cumple con el indicador "Configura correctamente el BFF para que, al igual
- * que el API Manager, pueda validar el token recibido con el IDaaS definido y
- * solo permita consumir el endpoint si el token es valido":
- *  - Valida issuer y audience.
- *  - Verifica firma (JWKS) y vigencia (exp/nbf) via JwtValidators.
- *  - Mapea el claim de roles de Azure AD ("roles") a authorities de Spring Security.
- *  - Aplica autorizacion por rol a nivel de endpoint.
- *  - Responde 401/403 con codigos de error adecuados en vez de 500.
  */
 @Configuration
 public class SecurityConfig {
@@ -45,29 +43,36 @@ public class SecurityConfig {
         NimbusJwtDecoder jwtDecoder = (NimbusJwtDecoder) JwtDecoders.fromIssuerLocation(issuerUri);
 
         OAuth2TokenValidator<org.springframework.security.oauth2.jwt.Jwt> withIssuer =
-                JwtValidators.createDefaultWithIssuer(issuerUri); // valida iss, exp, nbf, firma (JWKS)
+                JwtValidators.createDefaultWithIssuer(issuerUri);
         OAuth2TokenValidator<org.springframework.security.oauth2.jwt.Jwt> audienceValidator =
-                new AudienceValidator(expectedAudience); // valida "aud"
+                new AudienceValidator(expectedAudience);
 
         jwtDecoder.setJwtValidator(new DelegatingAudienceIssuerValidator(withIssuer, audienceValidator));
         return jwtDecoder;
     }
 
-    /** Convierte el claim "roles" (App Roles de Azure AD) en authorities ROLE_x */
     @Bean
     public JwtAuthenticationConverter jwtAuthenticationConverter() {
-        JwtGrantedAuthoritiesConverter grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
-        grantedAuthoritiesConverter.setAuthoritiesClaimName("roles");
-        grantedAuthoritiesConverter.setAuthorityPrefix("ROLE_");
-
-        JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
-        jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
-        return jwtAuthenticationConverter;
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            Object rolesClaim = jwt.getClaim("roles");
+            Collection<GrantedAuthority> authorities = new ArrayList<>();
+            if (rolesClaim instanceof List<?> rolesList) {
+                for (Object role : rolesList) {
+                    if (role != null) {
+                        authorities.add(new SimpleGrantedAuthority("ROLE_" + role.toString().toUpperCase()));
+                    }
+                }
+            }
+            return authorities;
+        });
+        return converter;
     }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
         http
+            .cors(cors -> {})
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
@@ -80,17 +85,28 @@ public class SecurityConfig {
             )
             .oauth2ResourceServer((OAuth2ResourceServerConfigurer<HttpSecurity> oauth2) -> oauth2
                 .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
-                // 401 si el token es invalido/ausente en lugar de un error generico
                 .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
             )
-            // 403 si el token es valido pero el rol no tiene permiso sobre el endpoint
             .exceptionHandling(ex -> ex.accessDeniedHandler((request, response, accessDeniedException) ->
                 response.sendError(HttpStatus.FORBIDDEN.value(), "No tiene permisos suficientes para este recurso")));
 
         return http.build();
     }
 
-    /** Valida que el claim "aud" del token contenga el Application ID URI configurado */
+    /** Permite que el frontend Angular (localhost:4200) consuma el BFF. */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(List.of("http://localhost:4200"));
+        config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("*"));
+        config.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
+    }
+
     static class AudienceValidator implements OAuth2TokenValidator<org.springframework.security.oauth2.jwt.Jwt> {
         private final String audience;
 
@@ -110,7 +126,6 @@ public class SecurityConfig {
         }
     }
 
-    /** Combina el validador por defecto (issuer/exp/firma) con el de audience */
     static class DelegatingAudienceIssuerValidator implements OAuth2TokenValidator<org.springframework.security.oauth2.jwt.Jwt> {
         private final OAuth2TokenValidator<org.springframework.security.oauth2.jwt.Jwt> issuerValidator;
         private final OAuth2TokenValidator<org.springframework.security.oauth2.jwt.Jwt> audienceValidator;

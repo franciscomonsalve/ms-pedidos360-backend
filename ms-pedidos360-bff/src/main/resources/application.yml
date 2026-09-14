@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 8080
 
 spring:
@@ -9,9 +9,9 @@ spring:
       resourceserver:
         jwt:
           # Emisor de Azure AD (Entra External ID). Reemplazar <TENANT_ID> por el tenant real.
-          issuer-uri: https://login.microsoftonline.com/${AZURE_TENANT_ID:CHANGE_ME}/v2.0
+          issuer-uri: https://login.microsoftonline.com/${AZURE_TENANT_ID:f280f365-653c-4282-b1ee-200e91b01736}/v2.0
           # Audience esperado del token (Application ID URI de la App Registration "Pedidos360")
-          audiences: api://${AZURE_API_CLIENT_ID:CHANGE_ME}
+          audiences: ${AZURE_API_CLIENT_ID:08c770a5-21a6-4434-8d59-28723c7c759d}
 
 pedidos360:
   downstream:
@@ -29,3 +29,4 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+

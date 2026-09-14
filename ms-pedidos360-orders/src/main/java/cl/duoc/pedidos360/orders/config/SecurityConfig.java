@@ -4,9 +4,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 
 /**
  * Cada microservicio interno vuelve a validar el JWT (issuer-uri configurado
@@ -19,12 +24,19 @@ public class SecurityConfig {
 
     @Bean
     public JwtAuthenticationConverter jwtAuthenticationConverter() {
-        JwtGrantedAuthoritiesConverter grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
-        grantedAuthoritiesConverter.setAuthoritiesClaimName("roles");
-        grantedAuthoritiesConverter.setAuthorityPrefix("ROLE_");
-
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
-        converter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            Object rolesClaim = jwt.getClaim("roles");
+            Collection<GrantedAuthority> authorities = new ArrayList<>();
+            if (rolesClaim instanceof List<?> rolesList) {
+                for (Object role : rolesList) {
+                    if (role != null) {
+                        authorities.add(new SimpleGrantedAuthority("ROLE_" + role.toString().toUpperCase()));
+                    }
+                }
+            }
+            return authorities;
+        });
         return converter;
     }
 
