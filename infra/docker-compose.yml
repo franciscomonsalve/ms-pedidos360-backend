@@ -29,6 +29,19 @@ services:
     networks:
       - pedidos360-net
 
+  frontend:
+    build:
+      context: ../../../frontend-pedidos360
+      dockerfile: Dockerfile
+    container_name: pedidos360-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - bff
+    networks:
+      - pedidos360-net
+
 networks:
   pedidos360-net:
     driver: bridge
