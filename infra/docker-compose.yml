@@ -1,0 +1,34 @@
+services:
+  orders:
+    build:
+      context: ..
+      dockerfile: ms-pedidos360-orders/Dockerfile
+    container_name: pedidos360-orders
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      AZURE_TENANT_ID: f280f365-653c-4282-b1ee-200e91b01736
+      AZURE_API_CLIENT_ID: 08c770a5-21a6-4434-8d59-28723c7c759d
+    ports:
+      - "8081:8081"
+    networks:
+      - pedidos360-net
+
+  bff:
+    build:
+      context: ..
+      dockerfile: ms-pedidos360-bff/Dockerfile
+    container_name: pedidos360-bff
+    environment:
+      AZURE_TENANT_ID: f280f365-653c-4282-b1ee-200e91b01736
+      AZURE_API_CLIENT_ID: 08c770a5-21a6-4434-8d59-28723c7c759d
+      ORDERS_SERVICE_URL: http://orders:8081
+    ports:
+      - "8080:8080"
+    depends_on:
+      - orders
+    networks:
+      - pedidos360-net
+
+networks:
+  pedidos360-net:
+    driver: bridge
