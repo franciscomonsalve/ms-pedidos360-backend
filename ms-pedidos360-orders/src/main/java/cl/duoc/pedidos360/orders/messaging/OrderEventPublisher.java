@@ -16,6 +16,8 @@ import java.util.Map;
 @Component
 public class OrderEventPublisher {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(OrderEventPublisher.class);
+
     private final KafkaTemplate<String, MessageEnvelope> kafkaTemplate;
 
     @Value("${pedidos360.messaging.topic-orders-events}")
@@ -37,7 +39,18 @@ public class OrderEventPublisher {
                         "status", order.getStatus().name(),
                         "totalAmount", order.getTotalAmount()
                 ));
-        kafkaTemplate.send(ordersEventsTopic, String.valueOf(order.getId()), envelope);
+        try {
+            kafkaTemplate.send(ordersEventsTopic, String.valueOf(order.getId()), envelope)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        log.warn("No se pudo publicar el evento '{}' del pedido {} en Kafka: {}",
+                                eventType, order.getId(), ex.getMessage());
+                    }
+                });
+        } catch (Exception ex) {
+            log.warn("Kafka no disponible; se omite la publicación del evento '{}' del pedido {}: {}",
+                    eventType, order.getId(), ex.getMessage());
+        }
     }
 
     private String mapEventType(OrderStatus status) {

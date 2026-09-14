@@ -2,7 +2,9 @@ package cl.duoc.pedidos360.bff.controller;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -13,6 +15,8 @@ import reactor.core.publisher.Mono;
 
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * Punto unico de entrada del backend para el frontend Angular (patron BFF).
@@ -65,13 +69,15 @@ public class GatewayController {
         String query = request.getQueryString();
         String uri = downstreamPath + (query != null ? "?" + query : "");
 
+        // Hop-by-hop y de codificacion: los recalcula WebClient; el resto (incluye Authorization) se propaga
+        Set<String> excludedHeaders = Set.of("transfer-encoding", "connection", "accept-encoding", "content-length", "host");
+
         WebClient.RequestBodySpec spec = client.method(HttpMethod.valueOf(request.getMethod())).uri(uri);
         spec.headers(headers -> {
             Enumeration<String> names = request.getHeaderNames() != null ? request.getHeaderNames() : Collections.emptyEnumeration();
             while (names.hasMoreElements()) {
                 String name = names.nextElement();
-                // Content-Length se recalcula por WebClient; el resto (incluye Authorization) se propaga
-                if (!"content-length".equalsIgnoreCase(name) && !"host".equalsIgnoreCase(name)) {
+                if (!excludedHeaders.contains(name.toLowerCase(Locale.ROOT))) {
                     headers.add(name, request.getHeader(name));
                 }
             }
@@ -81,6 +87,15 @@ public class GatewayController {
                 ? spec.bodyValue(body).retrieve()
                 : spec.retrieve();
 
-        return responseSpec.toEntity(String.class);
+        // Solo status + Content-Type: los headers de transporte del downstream chocarian con los de Spring
+        return responseSpec.toEntity(String.class)
+                .map(resp -> {
+                    HttpHeaders clean = new HttpHeaders();
+                    MediaType ct = resp.getHeaders().getContentType();
+                    if (ct != null) {
+                        clean.setContentType(ct);
+                    }
+                    return new ResponseEntity<>(resp.getBody(), clean, resp.getStatusCode());
+                });
     }
 }
