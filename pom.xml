@@ -17,7 +17,9 @@
         <module>ms-pedidos360-catalog</module>
         <module>ms-pedidos360-notify</module>
         <module>ms-pedidos360-audit</module>
-        <module>ms-pedidos360-report</module>
+        <!-- ms-pedidos360-report: fuera del alcance de EP1 (reportería/Kafka pertenece
+             al caso semestral completo). Se agrega de vuelta cuando tenga su propio
+             pom.xml y código real; por ahora rompía "mvn install" al no tener pom.xml. -->
     </modules>
 
     <properties>
