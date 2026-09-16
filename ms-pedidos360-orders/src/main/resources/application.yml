@@ -65,7 +65,7 @@ spring:
     activate:
       on-profile: cloud
   datasource:
-    url: jdbc:postgresql://${DB_HOST:pedidos360-db.clslztcqqdgp.us-east-1.rds.amazonaws.com}:${DB_PORT:5432}/${DB_NAME:pedidos360_db}?ssl=true&sslmode=verify-full&sslrootcert=./global-bundle.pem
+    url: jdbc:postgresql://${DB_HOST:pedidos360-db.clslztcqqdgp.us-east-1.rds.amazonaws.com}:${DB_PORT:5432}/${DB_NAME:pedidos360_db}?ssl=true&sslmode=require
     driver-class-name: org.postgresql.Driver
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:Pedidos360_2026}
