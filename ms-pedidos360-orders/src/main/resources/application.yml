@@ -65,13 +65,13 @@ spring:
     activate:
       on-profile: cloud
   datasource:
-    url: jdbc:oracle:thin:@${DB_HOST:localhost}:${DB_PORT:1521}/${DB_SERVICE:ORCLPDB1}
-    driver-class-name: oracle.jdbc.OracleDriver
-    username: ${DB_USER:pedidos360}
-    password: ${DB_PASSWORD:changeme}
+    url: jdbc:postgresql://${DB_HOST:pedidos360-db.clslztcqqdgp.us-east-1.rds.amazonaws.com}:${DB_PORT:5432}/${DB_NAME:pedidos360_db}?ssl=true&sslmode=verify-full&sslrootcert=./global-bundle.pem
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:Pedidos360_2026}
   jpa:
-    database-platform: org.hibernate.dialect.OracleDialect
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
-      ddl-auto: validate
-    show-sql: false
+      ddl-auto: update
+    show-sql: true
 

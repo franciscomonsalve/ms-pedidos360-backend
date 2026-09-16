@@ -17,9 +17,6 @@
         <module>ms-pedidos360-catalog</module>
         <module>ms-pedidos360-notify</module>
         <module>ms-pedidos360-audit</module>
-        <!-- ms-pedidos360-report: fuera del alcance de EP1 (reportería/Kafka pertenece
-             al caso semestral completo). Se agrega de vuelta cuando tenga su propio
-             pom.xml y código real; por ahora rompía "mvn install" al no tener pom.xml. -->
     </modules>
 
     <properties>
@@ -43,9 +40,6 @@
 
     <build>
         <plugins>
-            <!-- Fuerza el compilador a usar el JDK 21 declarado en ~/.m2/toolchains.xml,
-                 sin importar qué JDK ejecuta Maven (evita romper Lombok si el JAVA_HOME
-                 del sistema apunta a una version mas nueva que Lombok aun no soporta). -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-toolchains-plugin</artifactId>
