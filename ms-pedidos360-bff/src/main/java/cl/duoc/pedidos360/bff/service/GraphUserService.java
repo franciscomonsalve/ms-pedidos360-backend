@@ -95,8 +95,7 @@ public class GraphUserService {
         boolean roleAssigned = assignAppRole(token, userId, role);
 
         String message = roleAssigned
-                ? "Usuario creado en Entra ID con el rol " + role
-                    + ". Debera cambiar la contrasena en el primer inicio de sesion."
+                ? "Usuario creado en Entra ID con el rol " + role + "."
                 : "Usuario creado en Entra ID, pero no se pudo asignar el rol " + role
                     + ". Un administrador debe asignarlo manualmente en Azure.";
 
@@ -112,8 +111,12 @@ public class GraphUserService {
                 "displayName", request.displayName(),
                 "mailNickname", request.mailNickname().toLowerCase(),
                 "userPrincipalName", upn,
+                // forceChangePasswordNextSignIn=false: en este tenant (External ID/CIAM)
+                // el paso de "cambia tu clave" del primer login rompe el flujo de MSAL
+                // (AADSTS900561, GET a un endpoint que solo acepta POST). La clave que
+                // el usuario define en el registro queda como definitiva.
                 "passwordProfile", Map.of(
-                        "forceChangePasswordNextSignIn", true,
+                        "forceChangePasswordNextSignIn", false,
                         "password", request.password()
                 )
         );

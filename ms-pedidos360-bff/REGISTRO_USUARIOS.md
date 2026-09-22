@@ -62,7 +62,11 @@ login seguirá funcionando solo para administradores autenticados.
 ## 5. Comportamiento del usuario creado
 
 - `accountEnabled: true`
-- `forceChangePasswordNextSignIn: true` → Azure pide cambiar la clave en el primer login.
+- `forceChangePasswordNextSignIn: false` → la clave que el usuario define en el
+  registro queda como definitiva. Se probó con `true` (el estándar recomendado),
+  pero en este tenant (External ID/CIAM) ese paso de "cambia tu clave" del
+  primer login rompe el flujo de MSAL (`AADSTS900561: The endpoint only
+  accepts POST requests. Received a GET request.`), así que se desactivó.
 - El `otherMails` se rellena con el correo de recuperación si se indicó.
 - Si falla la asignación del rol, el usuario **sí queda creado** y la respuesta lo
   avisa (`roleAssigned: false`) para que un admin lo asigne a mano.
