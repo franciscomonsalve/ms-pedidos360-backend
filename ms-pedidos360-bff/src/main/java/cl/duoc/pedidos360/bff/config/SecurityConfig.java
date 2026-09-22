@@ -81,6 +81,10 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                // Preflight CORS: el navegador nunca manda Authorization en un OPTIONS.
+                // API Gateway ya enruta el OPTIONS real hasta aca (ruta propia sin
+                // Authorizer JWT), asi que el BFF tambien debe dejarlo pasar sin JWT.
+                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 // Registro autoservicio desde la pantalla de login: no hay JWT todavia.
                 // El rol que puede crearse esta limitado por pedidos360.graph.self-service-roles.
                 .requestMatchers(HttpMethod.POST, "/api/users/register").permitAll()
