@@ -55,10 +55,17 @@
             <artifactId>spring-kafka</artifactId>
         </dependency>
 
-        <!-- Driver PostgreSQL -->
+        <!-- Driver PostgreSQL (perfil cloud) -->
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Driver H2 (perfil dev: application.yml usa jdbc:h2:mem:orders) -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
             <scope>runtime</scope>
         </dependency>
 
