@@ -14,6 +14,29 @@ spring:
           audiences: ${AZURE_API_CLIENT_ID:08c770a5-21a6-4434-8d59-28723c7c759d}
 
 pedidos360:
+  cors:
+    # El CORS "real" para el navegador lo define API Gateway (API Manager) y
+    # este valor debe coincidir con el origin configurado ahi. Este bean solo
+    # existe para que Spring MVC no rechace el preflight con 403 antes de
+    # llegar a los controllers (ver SecurityConfig.corsConfigurationSource).
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+
+  graph:
+    # App Registration usada por el BFF para hablar con Microsoft Graph (client credentials).
+    # Necesita permisos de APLICACION con consentimiento de administrador:
+    #   User.ReadWrite.All           -> crear usuarios en el directorio
+    #   AppRoleAssignment.ReadWrite.All -> asignar el App Role (Admin/Operator/Customer)
+    tenant-id: ${AZURE_TENANT_ID:f280f365-653c-4282-b1ee-200e91b01736}
+    client-id: ${AZURE_GRAPH_CLIENT_ID:}
+    client-secret: ${AZURE_GRAPH_CLIENT_SECRET:}
+    # Dominio verificado del tenant; forma el userPrincipalName <alias>@<dominio>
+    user-domain: ${AZURE_USER_DOMAIN:}
+    # appId de la App Registration de la API (donde estan definidos los App Roles)
+    api-app-id: ${AZURE_API_CLIENT_ID:08c770a5-21a6-4434-8d59-28723c7c759d}
+    # Rol por defecto y roles que el registro publico puede auto-asignarse
+    default-role: ${AZURE_DEFAULT_ROLE:Customer}
+    self-service-roles: ${AZURE_SELF_SERVICE_ROLES:Customer}
+
   downstream:
     orders-url: ${ORDERS_SERVICE_URL:http://localhost:8081}
     catalog-url: ${CATALOG_SERVICE_URL:http://localhost:8082}

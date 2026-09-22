@@ -3,6 +3,7 @@ package cl.duoc.pedidos360.bff.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -16,6 +17,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -28,8 +30,19 @@ import java.util.List;
 
 /**
  * Configura la validacion del JWT emitido por Azure AD (IDaaS) en el BFF.
+ *
+ * El CORS "real" para el navegador lo define AWS API Gateway (API Manager),
+ * que ademas ignora/sobreescribe cualquier header Access-Control-* que
+ * devuelva este backend. Pero Spring MVC igual necesita un
+ * CorsConfigurationSource propio: sin el, el DispatcherServlet detecta el
+ * preflight (headers Origin + Access-Control-Request-Method) y lo rechaza
+ * con 403 "Invalid CORS request" antes de llegar a los controllers, sin
+ * importar que la autorizacion de Spring Security ya permita OPTIONS. Este
+ * bean solo existe para que el BFF responda 2xx al preflight; los valores
+ * que el navegador realmente ve son los que configuraste en API Gateway.
  */
 @Configuration
+@EnableMethodSecurity
 public class SecurityConfig {
 
     @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
@@ -37,6 +50,10 @@ public class SecurityConfig {
 
     @Value("${spring.security.oauth2.resourceserver.jwt.audiences}")
     private String expectedAudience;
+
+    /** Origenes del SPA; deben coincidir con el CORS configurado en API Gateway. */
+    @Value("${pedidos360.cors.allowed-origins:http://localhost:4200}")
+    private String allowedOrigins;
 
     @Bean
     public JwtDecoder jwtDecoder() {
@@ -77,6 +94,15 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                // Preflight CORS: el navegador nunca manda Authorization en un OPTIONS.
+                // API Gateway ya enruta el OPTIONS real hasta aca (ruta propia sin
+                // Authorizer JWT), asi que el BFF tambien debe dejarlo pasar sin JWT.
+                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                // Registro autoservicio desde la pantalla de login: no hay JWT todavia.
+                // El rol que puede crearse esta limitado por pedidos360.graph.self-service-roles.
+                .requestMatchers(HttpMethod.POST, "/api/users/register").permitAll()
+                // Alta administrativa con cualquier rol (ademas de @PreAuthorize en el controller)
+                .requestMatchers("/api/users/**").hasRole("ADMIN")
                 .requestMatchers("/api/catalog/**").hasAnyRole("ADMIN", "OPERATOR")
                 .requestMatchers("/api/report/**").hasRole("ADMIN")
                 .requestMatchers("/api/audit/**").hasRole("ADMIN")
@@ -93,14 +119,14 @@ public class SecurityConfig {
         return http.build();
     }
 
-    /** Permite que el frontend Angular (localhost:4200) consuma el BFF. */
+    /** Fuente de CORS que Spring MVC necesita para no rechazar el preflight con 403. */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:4200"));
+        config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim).toList());
         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
-        config.setAllowCredentials(true);
+        config.setAllowCredentials(false);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
