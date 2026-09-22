@@ -19,17 +19,19 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
 /**
  * Configura la validacion del JWT emitido por Azure AD (IDaaS) en el BFF.
+ *
+ * El CORS ya NO se maneja aqui: el navegador solo habla con AWS API Gateway
+ * (nunca directo con el BFF), asi que CORS se configura del lado del API
+ * Manager. Si el BFF tambien agregara sus propios headers Access-Control-*,
+ * quedarian duplicados sobre los del Gateway y el navegador rechazaria la
+ * respuesta.
  */
 @Configuration
 @EnableMethodSecurity
@@ -40,10 +42,6 @@ public class SecurityConfig {
 
     @Value("${spring.security.oauth2.resourceserver.jwt.audiences}")
     private String expectedAudience;
-
-    /** Origenes del SPA autorizados por CORS (coma-separados). */
-    @Value("${pedidos360.cors.allowed-origins:http://localhost:4200}")
-    private String allowedOrigins;
 
     @Bean
     public JwtDecoder jwtDecoder() {
@@ -79,7 +77,6 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
         http
-            .cors(cors -> {})
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
@@ -103,20 +100,6 @@ public class SecurityConfig {
                 response.sendError(HttpStatus.FORBIDDEN.value(), "No tiene permisos suficientes para este recurso")));
 
         return http.build();
-    }
-
-    /** Permite que el frontend Angular (localhost:4200) consuma el BFF. */
-    @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim).toList());
-        config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
-        config.setAllowCredentials(true);
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config);
-        return source;
     }
 
     static class AudienceValidator implements OAuth2TokenValidator<org.springframework.security.oauth2.jwt.Jwt> {
