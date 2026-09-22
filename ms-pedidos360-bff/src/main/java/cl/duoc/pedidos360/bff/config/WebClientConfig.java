@@ -20,6 +20,12 @@ public class WebClientConfig {
     @Value("${pedidos360.downstream.report-url}")
     private String reportUrl;
 
+    @Value("${pedidos360.graph.base-url:https://graph.microsoft.com}")
+    private String graphBaseUrl;
+
+    @Value("${pedidos360.graph.login-url:https://login.microsoftonline.com}")
+    private String azureLoginUrl;
+
     @Bean
     public WebClient ordersWebClient(WebClient.Builder builder) {
         return builder.baseUrl(ordersUrl).build();
@@ -38,5 +44,17 @@ public class WebClientConfig {
     @Bean
     public WebClient reportWebClient(WebClient.Builder builder) {
         return builder.baseUrl(reportUrl).build();
+    }
+
+    /** Microsoft Graph: alta de usuarios y asignacion de App Roles en Entra ID. */
+    @Bean
+    public WebClient graphWebClient(WebClient.Builder builder) {
+        return builder.baseUrl(graphBaseUrl).build();
+    }
+
+    /** Endpoint de token de Azure AD: obtiene el access token app-only para Graph. */
+    @Bean
+    public WebClient azureTokenWebClient(WebClient.Builder builder) {
+        return builder.baseUrl(azureLoginUrl).build();
     }
 }

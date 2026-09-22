@@ -3,6 +3,7 @@ package cl.duoc.pedidos360.bff.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -16,6 +17,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -30,6 +32,7 @@ import java.util.List;
  * Configura la validacion del JWT emitido por Azure AD (IDaaS) en el BFF.
  */
 @Configuration
+@EnableMethodSecurity
 public class SecurityConfig {
 
     @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
@@ -37,6 +40,10 @@ public class SecurityConfig {
 
     @Value("${spring.security.oauth2.resourceserver.jwt.audiences}")
     private String expectedAudience;
+
+    /** Origenes del SPA autorizados por CORS (coma-separados). */
+    @Value("${pedidos360.cors.allowed-origins:http://localhost:4200}")
+    private String allowedOrigins;
 
     @Bean
     public JwtDecoder jwtDecoder() {
@@ -77,6 +84,11 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                // Registro autoservicio desde la pantalla de login: no hay JWT todavia.
+                // El rol que puede crearse esta limitado por pedidos360.graph.self-service-roles.
+                .requestMatchers(HttpMethod.POST, "/api/users/register").permitAll()
+                // Alta administrativa con cualquier rol (ademas de @PreAuthorize en el controller)
+                .requestMatchers("/api/users/**").hasRole("ADMIN")
                 .requestMatchers("/api/catalog/**").hasAnyRole("ADMIN", "OPERATOR")
                 .requestMatchers("/api/report/**").hasRole("ADMIN")
                 .requestMatchers("/api/audit/**").hasRole("ADMIN")
@@ -97,7 +109,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:4200"));
+        config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim).toList());
         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
