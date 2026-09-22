@@ -14,9 +14,12 @@ spring:
           audiences: ${AZURE_API_CLIENT_ID:08c770a5-21a6-4434-8d59-28723c7c759d}
 
 pedidos360:
-  # CORS ya no se maneja aqui: el navegador solo habla con AWS API Gateway,
-  # nunca directo con el BFF. CORS se configura del lado del API Manager
-  # (ver REGISTRO_USUARIOS.md / instrucciones de despliegue).
+  cors:
+    # El CORS "real" para el navegador lo define API Gateway (API Manager) y
+    # este valor debe coincidir con el origin configurado ahi. Este bean solo
+    # existe para que Spring MVC no rechace el preflight con 403 antes de
+    # llegar a los controllers (ver SecurityConfig.corsConfigurationSource).
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}
 
   graph:
     # App Registration usada por el BFF para hablar con Microsoft Graph (client credentials).
