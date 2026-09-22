@@ -197,6 +197,24 @@ public class GraphUserService {
                 return false;
             }
 
+            return assignAppRoleWithRetry(token, userId, role, servicePrincipalId, appRoleId, 3);
+
+        } catch (WebClientResponseException ex) {
+            log.error("Fallo la asignacion del rol {} al usuario {}: {}", role, userId, ex.getResponseBodyAsString());
+            return false;
+        }
+    }
+
+    /**
+     * El directorio de Entra ID replica de forma eventual: justo despues de
+     * POST /v1.0/users, el nuevo objeto puede no estar aun disponible como
+     * principalId en todas las particiones, y Graph responde 400
+     * "Not a valid reference update" aunque el rol y los IDs esten bien.
+     * Reintentamos con backoff corto antes de rendirnos.
+     */
+    private boolean assignAppRoleWithRetry(String token, String userId, String role,
+                                            String servicePrincipalId, String appRoleId, int attemptsLeft) {
+        try {
             graphWebClient.post()
                     .uri("/v1.0/servicePrincipals/{spId}/appRoleAssignedTo", servicePrincipalId)
                     .headers(h -> h.setBearerAuth(token))
@@ -214,6 +232,21 @@ public class GraphUserService {
             return true;
 
         } catch (WebClientResponseException ex) {
+            boolean pareceReplicacionPendiente = ex.getStatusCode() == HttpStatus.BAD_REQUEST
+                    && ex.getResponseBodyAsString().contains("Not a valid reference update");
+
+            if (pareceReplicacionPendiente && attemptsLeft > 1) {
+                log.warn("Asignacion de rol para {} aun no disponible (replicacion del directorio); reintentando... ({} intentos restantes)",
+                        userId, attemptsLeft - 1);
+                try {
+                    Thread.sleep(1200);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+                return assignAppRoleWithRetry(token, userId, role, servicePrincipalId, appRoleId, attemptsLeft - 1);
+            }
+
             log.error("Fallo la asignacion del rol {} al usuario {}: {}", role, userId, ex.getResponseBodyAsString());
             return false;
         }
