@@ -1,9 +1,11 @@
 package cl.duoc.pedidos360.bff.controller;
 
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.LinkedHashMap;
@@ -32,6 +34,17 @@ public class ApiExceptionHandler {
                 .distinct()
                 .collect(Collectors.joining(". "));
         return ResponseEntity.badRequest().body(body(detalle));
+    }
+
+    /**
+     * Error devuelto por un microservicio interno al que el BFF hace de proxy:
+     * se propaga el status y el cuerpo originales (ej. un 400 de validacion del
+     * administrador de RabbitMQ) en vez de convertirlo en un 500 generico.
+     */
+    @ExceptionHandler(WebClientResponseException.class)
+    public ResponseEntity<String> handleDownstream(WebClientResponseException ex) {
+        MediaType type = ex.getHeaders().getContentType() != null ? ex.getHeaders().getContentType() : MediaType.APPLICATION_JSON;
+        return ResponseEntity.status(ex.getStatusCode()).contentType(type).body(ex.getResponseBodyAsString());
     }
 
     private Map<String, Object> body(String mensaje) {

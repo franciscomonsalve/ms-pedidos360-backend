@@ -20,6 +20,9 @@ public class WebClientConfig {
     @Value("${pedidos360.downstream.report-url}")
     private String reportUrl;
 
+    @Value("${pedidos360.downstream.rabbit-admin-url}")
+    private String rabbitAdminUrl;
+
     @Value("${pedidos360.graph.base-url:https://graph.microsoft.com}")
     private String graphBaseUrl;
 
@@ -44,6 +47,11 @@ public class WebClientConfig {
     @Bean
     public WebClient reportWebClient(WebClient.Builder builder) {
         return builder.baseUrl(reportUrl).build();
+    }
+
+    @Bean
+    public WebClient rabbitAdminWebClient(WebClient.Builder builder) {
+        return builder.baseUrl(rabbitAdminUrl).build();
     }
 
     /** Microsoft Graph: alta de usuarios y asignacion de App Roles en Entra ID. */

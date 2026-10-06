@@ -42,6 +42,7 @@ pedidos360:
     catalog-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
     audit-url: ${AUDIT_SERVICE_URL:http://localhost:8084}
     report-url: ${REPORT_SERVICE_URL:http://localhost:8085}
+    rabbit-admin-url: ${RABBIT_ADMIN_SERVICE_URL:http://localhost:8086}
 
 management:
   endpoints:
