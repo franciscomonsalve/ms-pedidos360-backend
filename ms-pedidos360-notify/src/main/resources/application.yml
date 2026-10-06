@@ -11,11 +11,39 @@ spring:
     password: ${RABBITMQ_PASS:guest}
     listener:
       simple:
+        # Ack manual: cada consumidor confirma (ack) o rechaza (reject/nack)
+        # de forma explicita via CommandProcessor.
         acknowledge-mode: manual
-        retry:
-          enabled: true
-          initial-interval: 2000
-          max-attempts: 3
+        prefetch: 10
+        default-requeue-rejected: false
+        missing-queues-fatal: false
+
+pedidos360:
+  messaging:
+    # Gancho de demostracion de fallas (payload.failMode = transient | poison).
+    # Apagado por defecto; se activa por variable de entorno en la demo.
+    simulate-failures: ${PEDIDOS360_SIMULATE_FAILURES:false}
+
+    # RabbitMQ: MISMOS nombres que ms-pedidos360-orders (unica fuente de verdad
+    # por servicio; ni la topologia ni los @RabbitListener escriben nombres).
+    rabbit:
+      exchanges:
+        direct: cmd.direct
+        topic: cmd.topic
+        dead-letter: cmd.dead.dlx
+      queues:
+        email:
+          name: q.cmd.email
+          routing-key: email.send
+          topic-prefix: cmd.email
+        kitchen:
+          name: q.cmd.kitchen
+          routing-key: kitchen.ticket
+          topic-prefix: cmd.kitchen
+        invoice:
+          name: q.cmd.invoice
+          routing-key: invoice.gen
+          topic-prefix: cmd.invoice
 
 management:
   endpoints:
