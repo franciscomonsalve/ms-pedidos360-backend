@@ -1,0 +1,6 @@
+# Archivos que se montan en contenedores Linux o se ejecutan en ellos: siempre LF.
+# Con CRLF (checkout en Windows con autocrlf) RabbitMQ lee valores con "\r" y falla.
+*.sh text eol=lf
+infra/rabbitmq/* text eol=lf
+Dockerfile text eol=lf
+*.conf text eol=lf
