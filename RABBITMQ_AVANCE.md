@@ -74,26 +74,106 @@ POST   /api/rabbit/messages        {"exchange":"cmd.direct","routingKey":"email.
 ```
 Los listados usan la API HTTP de gestión de RabbitMQ (puerto 15672); las altas/bajas usan AMQP.
 
-## 4. Pendiente
+## 4. Hecho en la rama `feature/rabbitmq` (Fase B, EP4 — infraestructura, probada en local)
 
-### Fase B — EP4 (nube) — **no empezada**
-1. `infra/docker-compose.yml`: agregar **2 nodos RabbitMQ** (`rabbitmq:3.12-management`, mismo
-   `RABBITMQ_ERLANG_COOKIE`, hostnames `rabbit1`/`rabbit2`, el 2.º se une al 1.º con
-   `rabbitmqctl join_cluster`, o peer discovery `classic_config`), con política de réplica (`ha-all`).
-2. Agregar al compose los servicios `notify` (8083) y `rabbit-admin` (8086) y las variables:
-   - `SPRING_RABBITMQ_ADDRESSES=rabbit1:5672,rabbit2:5672` en orders, notify y rabbit-admin
-   - `RABBITMQ_MANAGEMENT_URL=http://rabbit1:15672` en rabbit-admin
-   - `RABBIT_ADMIN_SERVICE_URL=http://rabbit-admin:8086` en el BFF
-   - `PEDIDOS360_SIMULATE_FAILURES=true` en notify (solo para la demo)
-3. Memoria del EC2 (`t3.medium`, ~3.7 GB): ahora serían 5 JVM + 2 RabbitMQ + nginx. Probablemente
-   cabe; si no, limitar con `JAVA_TOOL_OPTIONS=-Xmx256m`.
-4. Security Group del EC2: abrir 15672 (UI de gestión) para la demo, o usar túnel SSH.
-5. **Probar contra un broker real** (hasta ahora solo hay pruebas unitarias): flujo completo
-   cambiar estado de un pedido → mensajes en las 3 colas → consumo; mensaje inválido → DLQ;
-   `rabbitmqctl cluster_status`; revisar `exchangeDeclarePassive` y los listados del admin.
-6. Desplegar la rama en el EC2 (git pull + rebuild) y verificar que `PATCH /api/orders/{id}/status` ya funciona.
-7. Agregar a la guía de presentación (`Guion_Presentacion_EP2.md` / `.docx`) los bloques de RabbitMQ:
-   clúster de 2 nodos, 3 colas + DLQ, exchanges direct/topic, docker-compose en la nube.
+Todo en `infra/`. `docker compose config` valida sin errores; **falta probarlo contra Docker**
+(Docker Desktop estaba apagado al momento de escribirlo).
+
+| Archivo | Qué hace |
+|---|---|
+| `infra/rabbitmq/rabbitmq.conf` | Config compartida por los 2 nodos: peer discovery `classic_config` con `rabbit@rabbit1` y `rabbit@rabbit2`, `cluster_partition_handling = autoheal`, `loopback_users.guest = false` (los servicios conectan desde otros contenedores) y tope `vm_memory_high_watermark.absolute = 256MB` |
+| `infra/rabbitmq/ha-policy.json` | Política `ha-all`: `pattern ^q\.cmd\.`, `ha-mode: all`, `ha-sync-mode: automatic`, `apply-to: queues` → replica las 3 colas y sus 3 DLQ en ambos nodos |
+| `infra/docker-compose.yml` | Servicios nuevos `rabbit1`, `rabbit2`, `rabbit-init`, `notify`, `rabbit-admin`; variables de clúster en `orders`/`notify`/`rabbit-admin`; `RABBIT_ADMIN_SERVICE_URL` en el BFF; `-Xmx` por servicio |
+| `infra/verificar-cluster.sh` | Chequeo para la demo: `cluster_status`, nodos, política, colas + DLQ, exchanges direct/topic, bindings y réplicas sincronizadas |
+
+Detalles del compose:
+
+- **Nombres de nodo**: se fijan con `hostname: rabbit1` / `rabbit2` (RabbitMQ toma el hostname),
+  más el mismo `RABBITMQ_ERLANG_COOKIE: pedidos360-cluster-cookie` en los dos.
+- **Orden de arranque**: `rabbit2` espera a que `rabbit1` esté `service_healthy`
+  (`rabbitmq-diagnostics check_running`). `classic_config` no tiene lock distribuido, así que
+  arrancar los dos en simultáneo puede dejar dos clústers de un nodo.
+- **Puertos**: `rabbit1` → 5672 / 15672; `rabbit2` → 5673 / 15673 (así se ven los dos nodos en la demo).
+- **Volúmenes** `rabbit1-data` / `rabbit2-data` para que el clúster sobreviva a `docker compose down`.
+- **`rabbit-init`**: contenedor de un solo uso (`curlimages/curl`) que aplica la política por la API
+  HTTP de gestión y luego imprime los nodos del clúster. Se usa HTTP en vez de `rabbitmqctl` para no
+  depender de la cookie de Erlang desde un contenedor ajeno al clúster.
+- **Clientes**: `SPRING_RABBITMQ_ADDRESSES=rabbit1:5672,rabbit2:5672` en `orders`, `notify` y
+  `rabbit-admin` (en Spring Boot, `addresses` tiene prioridad sobre `host`/`port`), de modo que si un
+  nodo cae el cliente reconecta al otro. `RABBITMQ_MANAGEMENT_URL=http://rabbit1:15672` en el admin.
+- **Memoria**: cada JVM con `JAVA_TOOL_OPTIONS=-Xmx256m/-Xmx192m -XX:MaxMetaspaceSize=128m` y cada
+  nodo RabbitMQ con `vm_memory_high_watermark.absolute = 256MB`. A propósito **no** se usa `mem_limit`:
+  un OOM-kill del kernel tumbaría el contenedor justo en la demo. Footprint esperado ≈ 2 GB.
+
+### Ojo con esto
+- **Tamaño del EC2**: `Despliegue_AWS_Pedidos360_EP2.md` dice `t3.micro` (913 MB, sin swap);
+  la Fase A de este documento asumía `t3.medium`. Con 913 MB **no cabe** (5 JVM + 2 RabbitMQ + nginx).
+  Hay que confirmar el tipo real de instancia y, si sigue en `t3.micro`, subirla a `t3.small`/`t3.medium`
+  o agregar swap antes de la demo.
+- `infra/docker-compose.yml` ya traía el contexto de build del frontend en `../../../frontend-pedidos360`,
+  que desde `infra/` apunta a `Desktop/`, no a `Desktop/PEDIDOS360/`. En el EC2 funciona por el layout
+  de carpetas de allá; **en local hay que levantar solo los servicios que se necesiten**
+  (`docker compose up -d rabbit1 rabbit2 rabbit-init orders notify rabbit-admin`).
+- `rabbitmq:3.12` marca las colas espejadas clásicas (`ha-mode`) como **deprecadas** (en 4.x se
+  eliminan a favor de quorum queues). Para la demo sirve y no requiere tocar el código Java; migrar a
+  quorum queues implicaría declarar `x-queue-type: quorum` en `RabbitTopologyConfig`.
+
+## 5. Pendiente
+
+### Fase B — EP4 (nube) — probada en local con Docker; falta desplegar en el EC2
+1. ~~2 nodos RabbitMQ en clúster con política de réplica~~ → hecho y **verificado** (sección 5.1).
+2. ~~Servicios `notify` y `rabbit-admin` en el compose + variables de entorno~~ → hecho.
+3. ~~Probar el clúster con Docker en local~~ → **hecho** (sección 5.1).
+4. ~~Probar el flujo de mensajes contra un broker real (3 colas, DLQ, reintento)~~ → **hecho** con
+   `notify` + clúster (sección 5.1). **Falta** el tramo `orders` → `notify` (`PATCH /api/orders/{id}/status`),
+   que exige un JWT real: se prueba en el EC2 con un token de Admin.
+5. ~~Tolerancia a fallos: apagar `rabbit1`~~ → **hecho** (sección 5.1).
+6. **Probar `rabbit-admin`** (crear/eliminar colas, exchanges y bindings, `GET` de listados,
+   `exchangeDeclarePassive`) contra el broker real; también exige JWT de Admin → hacerlo en el EC2.
+7. Confirmar el tipo de instancia del EC2: en la sesión anterior se subió a **`t3.medium` (3.7 GB)**,
+   suficiente para el stack completo (~2 GB); verificar con `free -h`. La IP pública cambió desde la
+   última vez (la última conocida, `54.163.21.47`, ya no es confiable).
+8. Desplegar la rama en el EC2 (git pull + rebuild de todas las imágenes) y comprobar que
+   `PATCH /api/orders/{id}/status` funciona (el fix de `-parameters` aún no está desplegado).
+   Ojo: el `docker-compose.yml` del EC2 tiene cambios locales con secretos (Graph, CORS, ruta del
+   frontend) que chocan con el nuevo; conviene moverlos a un `.env` fuera de git.
+9. Security Group del EC2: abrir 15672 (y 15673 para mostrar el 2.º nodo) en la demo, o túnel SSH.
+10. Agregar a la guía de presentación (`Guion_Presentacion_EP2.md` / `.docx`) los bloques de RabbitMQ:
+    clúster de 2 nodos, 3 colas + DLQ, exchanges direct/topic, docker-compose en la nube.
+
+#### 5.1 Resultados de la prueba local (2026-10-08, Docker Desktop 4.71)
+
+`docker compose -f infra/docker-compose.yml up -d rabbit1 rabbit2 rabbit-init notify`
+
+- **Clúster:** `rabbitmqctl cluster_status` lista `rabbit@rabbit1` y `rabbit@rabbit2` como Disk Nodes y Running Nodes,
+  sin alarmas ni particiones. `rabbit-init` termina en 0 y aplica la política `ha-all`.
+- **Topología declarada por `notify`:** 3 colas (`q.cmd.email|kitchen|invoice`) + 3 DLQ, todas con política `ha-all`,
+  maestro en `rabbit1` y espejo sincronizado en `rabbit2`. Exchanges: `cmd.direct` (direct), `cmd.topic` (topic),
+  `cmd.dead.dlx` (direct). Bindings: direct por routing key, topic por `cmd.<dominio>.#`, DLX hacia cada DLQ.
+  Tres consumidores conectados (uno por cola principal).
+- **Flujo de mensajes (publicados con `node infra/publicar-mensajes-prueba.js`, vía la API de gestión):**
+
+  | Mensaje | Resultado |
+  |---|---|
+  | email válido por topic `cmd.email.aceptado` | procesado OK |
+  | kitchen e invoice válidos por direct | procesados OK |
+  | cuerpo que no es JSON | `[email] mensaje enviado a DLQ ... motivo: mensaje invalido` |
+  | kitchen sin `items` | DLQ, `error no recuperable: el payload no trae items` |
+  | `failMode: "transient"` | 1 reintento (WARN) y luego DLQ, `reintentos agotados` |
+  | `failMode: "poison"` | DLQ directo, `error no recuperable` |
+
+  Estado final de las DLQ: `email.dlq`=2, `kitchen.dlq`=1, `invoice.dlq`=1, sincronizadas en ambos nodos.
+- **Tolerancia a fallos:** con `docker stop pedidos360-rabbit1` las 6 colas pasaron a `rabbit@rabbit2` con sus mensajes
+  intactos, los 3 consumidores se re-engancharon, `notify` reconectó solo (`Attempting to connect to: [rabbit1:5672,
+  rabbit2:5672]`) y un mensaje nuevo publicado por `rabbit2` se procesó. Al hacer `docker start pedidos360-rabbit1`
+  el clúster volvió a 2 nodos en ejecución.
+
+#### 5.2 Problema de Docker Desktop en este equipo (por si reaparece)
+Docker Desktop 4.71 no arrancaba: `initializing Inference manager: ... remove ...\AppData\Local\Docker\run\dockerInference:
+El sistema no tiene acceso al archivo` (un socket viejo que Windows no deja borrar, error 1920). Se resolvió
+reiniciando Docker Desktop/Windows; no usar "Reset to factory defaults" (borra imágenes y volúmenes). Durante el
+diagnóstico se puso `"EnableDockerAI": false` en `%APPDATA%\Docker\settings-store.json` (no fue la solución; hay respaldo
+`settings-store.json.bak-pedidos360` por si se quiere revertir).
 
 ### Cierre de EP3
 - Merge de `feature/rabbitmq` a `main` cuando esté probada; el compañero (EP3 es en parejas) debería revisarla.
@@ -106,7 +186,7 @@ Los listados usan la API HTTP de gestión de RabbitMQ (puerto 15672); las altas/
   el repo; conviene dejarla solo como variable de entorno.
 - Idempotencia de `notify` en memoria (se pierde al reiniciar); suficiente para el MVP.
 
-## 5. Notas para retomar
+## 6. Notas para retomar
 - Repos: `https://github.com/franciscomonsalve/ms-pedidos360-backend` y `.../frontend-pedidos360-`.
   Copias locales: `C:\Users\Gene\Desktop\PEDIDOS360\pedidos360-backend` y `...\frontend-pedidos360`.
 - Compilar y probar: `mvn clean package` (desde la raíz del backend).
