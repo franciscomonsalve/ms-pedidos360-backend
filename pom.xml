@@ -17,6 +17,7 @@
         <module>ms-pedidos360-catalog</module>
         <module>ms-pedidos360-notify</module>
         <module>ms-pedidos360-audit</module>
+        <module>ms-pedidos360-rabbit-admin</module>
     </modules>
 
     <properties>
@@ -46,6 +47,10 @@
                 <version>3.13.0</version>
                 <configuration>
                     <release>21</release>
+                    <!-- Spring 6.1 exige los nombres de parametros en tiempo de ejecucion
+                         (@PathVariable/@RequestParam sin nombre explicito). El parent de
+                         spring-boot-starter-parent lo activa; aqui no se usa ese parent. -->
+                    <parameters>true</parameters>
                 </configuration>
             </plugin>
 

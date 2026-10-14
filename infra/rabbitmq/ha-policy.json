@@ -1,0 +1,9 @@
+{
+  "pattern": "^q\\.cmd\\.",
+  "apply-to": "queues",
+  "priority": 1,
+  "definition": {
+    "ha-mode": "all",
+    "ha-sync-mode": "automatic"
+  }
+}

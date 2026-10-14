@@ -1,4 +1,95 @@
+# Stack completo de Pedidos360 para el EC2.
+#
+# RabbitMQ corre como un CLUSTER DE 2 NODOS (rabbit1 + rabbit2): misma cookie de
+# Erlang, misma rabbitmq.conf (peer discovery classic_config) y una politica
+# `ha-all` que replica las 3 colas de comandos y sus 3 DLQ en ambos nodos.
+# Los microservicios conectan con SPRING_RABBITMQ_ADDRESSES apuntando a los dos
+# nodos, asi que si uno cae el cliente reconecta al otro.
+#
+# NOTA DE MEMORIA: esto son 5 JVM + 2 nodos RabbitMQ + nginx, aprox. 2 GB de RSS.
+# En un t3.micro (913 MB, sin swap) NO cabe: hay que usar t3.small/t3.medium o
+# agregar swap. El control de memoria son los `JAVA_TOOL_OPTIONS: -Xmx...` de cada
+# servicio y `vm_memory_high_watermark` en rabbitmq/rabbitmq.conf; a proposito NO se
+# usa `mem_limit`, porque un OOM-kill del kernel tumbaria el contenedor en plena demo.
+
 services:
+  # --------------------------------------------------------------- RabbitMQ
+  rabbit1:
+    image: rabbitmq:3.12-management
+    container_name: pedidos360-rabbit1
+    hostname: rabbit1                      # define el nombre de nodo: rabbit@rabbit1
+    environment:
+      RABBITMQ_ERLANG_COOKIE: pedidos360-cluster-cookie
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - rabbit1-data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"                         # AMQP
+      - "15672:15672"                       # UI de gestion (abrir en el Security Group para la demo)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 40s
+    networks:
+      - pedidos360-net
+
+  rabbit2:
+    image: rabbitmq:3.12-management
+    container_name: pedidos360-rabbit2
+    hostname: rabbit2                      # rabbit@rabbit2
+    environment:
+      RABBITMQ_ERLANG_COOKIE: pedidos360-cluster-cookie
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - rabbit2-data:/var/lib/rabbitmq
+    ports:
+      - "5673:5672"                         # AMQP del 2.0 nodo
+      - "15673:15672"                       # UI del 2.0 nodo
+    # Arranca cuando rabbit1 ya esta sano: el peer discovery classic_config no
+    # tiene lock distribuido, asi que no deben formar cluster en simultaneo.
+    depends_on:
+      rabbit1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 40s
+    networks:
+      - pedidos360-net
+
+  # Tarea de un solo uso: aplica la politica de replica a las colas de comandos
+  # (q.cmd.email/kitchen/invoice y sus 3 DLQ) sobre los 2 nodos del cluster.
+  # Se hace por la API HTTP de gestion y no por rabbitmqctl para no depender de
+  # la cookie de Erlang desde un contenedor ajeno al cluster.
+  rabbit-init:
+    image: curlimages/curl:8.8.0
+    container_name: pedidos360-rabbit-init
+    depends_on:
+      rabbit1:
+        condition: service_healthy
+      rabbit2:
+        condition: service_healthy
+    volumes:
+      - ./rabbitmq/ha-policy.json:/tmp/ha-policy.json:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "== Politica ha-all: replica de q.cmd.* en los 2 nodos =="
+        curl -sS -f -u guest:guest -H "content-type: application/json" -X PUT "http://rabbit1:15672/api/policies/%2F/ha-all" --data @/tmp/ha-policy.json
+        echo "   politica aplicada"
+        echo "== Nodos del cluster =="
+        curl -sS -f -u guest:guest "http://rabbit1:15672/api/nodes?columns=name,running"
+        echo ""
+    restart: "no"
+    networks:
+      - pedidos360-net
+
+  # ---------------------------------------------------------- Microservicios
   orders:
     build:
       context: ..
@@ -8,8 +99,55 @@ services:
       SPRING_PROFILES_ACTIVE: dev
       AZURE_TENANT_ID: f280f365-653c-4282-b1ee-200e91b01736
       AZURE_API_CLIENT_ID: 08c770a5-21a6-4434-8d59-28723c7c759d
+      # Los dos nodos del cluster: `addresses` tiene prioridad sobre host/port.
+      SPRING_RABBITMQ_ADDRESSES: rabbit1:5672,rabbit2:5672
+      JAVA_TOOL_OPTIONS: -Xmx256m -XX:MaxMetaspaceSize=128m
     ports:
       - "8081:8081"
+    depends_on:
+      rabbit1:
+        condition: service_healthy
+    networks:
+      - pedidos360-net
+
+  notify:
+    build:
+      context: ..
+      dockerfile: ms-pedidos360-notify/Dockerfile
+    container_name: pedidos360-notify
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_RABBITMQ_ADDRESSES: rabbit1:5672,rabbit2:5672
+      # Solo para la demo de DLQ: habilita failMode=transient|poison en el payload.
+      PEDIDOS360_SIMULATE_FAILURES: "true"
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:MaxMetaspaceSize=128m
+    ports:
+      - "8083:8083"
+    depends_on:
+      rabbit1:
+        condition: service_healthy
+    networks:
+      - pedidos360-net
+
+  rabbit-admin:
+    build:
+      context: ..
+      dockerfile: ms-pedidos360-rabbit-admin/Dockerfile
+    container_name: pedidos360-rabbit-admin
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      AZURE_TENANT_ID: f280f365-653c-4282-b1ee-200e91b01736
+      AZURE_API_CLIENT_ID: 08c770a5-21a6-4434-8d59-28723c7c759d
+      # Altas/bajas de colas, exchanges y bindings por AMQP.
+      SPRING_RABBITMQ_ADDRESSES: rabbit1:5672,rabbit2:5672
+      # Los listados usan la API HTTP de gestion (cualquier nodo del cluster sirve).
+      RABBITMQ_MANAGEMENT_URL: http://rabbit1:15672
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:MaxMetaspaceSize=128m
+    ports:
+      - "8086:8086"
+    depends_on:
+      rabbit1:
+        condition: service_healthy
     networks:
       - pedidos360-net
 
@@ -22,6 +160,7 @@ services:
       SPRING_PROFILES_ACTIVE: dev
       AZURE_TENANT_ID: f280f365-653c-4282-b1ee-200e91b01736
       AZURE_API_CLIENT_ID: 08c770a5-21a6-4434-8d59-28723c7c759d
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:MaxMetaspaceSize=128m
     ports:
       - "8084:8084"
     networks:
@@ -37,11 +176,15 @@ services:
       AZURE_API_CLIENT_ID: 08c770a5-21a6-4434-8d59-28723c7c759d
       ORDERS_SERVICE_URL: http://orders:8081
       AUDIT_SERVICE_URL: http://audit:8084
+      # Proxy /api/rabbit/** (solo rol Admin) hacia el microservicio administrador.
+      RABBIT_ADMIN_SERVICE_URL: http://rabbit-admin:8086
+      JAVA_TOOL_OPTIONS: -Xmx256m -XX:MaxMetaspaceSize=128m
     ports:
       - "8080:8080"
     depends_on:
       - orders
       - audit
+      - rabbit-admin
     networks:
       - pedidos360-net
 
@@ -57,6 +200,10 @@ services:
       - bff
     networks:
       - pedidos360-net
+
+volumes:
+  rabbit1-data:
+  rabbit2-data:
 
 networks:
   pedidos360-net:

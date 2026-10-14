@@ -11,6 +11,7 @@ COPY ms-pedidos360-orders/pom.xml ms-pedidos360-orders/pom.xml
 COPY ms-pedidos360-catalog/pom.xml ms-pedidos360-catalog/pom.xml
 COPY ms-pedidos360-notify/pom.xml ms-pedidos360-notify/pom.xml
 COPY ms-pedidos360-audit/pom.xml ms-pedidos360-audit/pom.xml
+COPY ms-pedidos360-rabbit-admin/pom.xml ms-pedidos360-rabbit-admin/pom.xml
 
 # El pom raiz exige un toolchain JDK 21 (maven-toolchains-plugin). Se declara
 # apuntando al JDK de la propia imagen, que ya es 21.

@@ -33,15 +33,18 @@ public class GatewayController {
     private final WebClient catalogWebClient;
     private final WebClient auditWebClient;
     private final WebClient reportWebClient;
+    private final WebClient rabbitAdminWebClient;
 
     public GatewayController(@Qualifier("ordersWebClient") WebClient ordersWebClient,
                               @Qualifier("catalogWebClient") WebClient catalogWebClient,
                               @Qualifier("auditWebClient") WebClient auditWebClient,
-                              @Qualifier("reportWebClient") WebClient reportWebClient) {
+                              @Qualifier("reportWebClient") WebClient reportWebClient,
+                              @Qualifier("rabbitAdminWebClient") WebClient rabbitAdminWebClient) {
         this.ordersWebClient = ordersWebClient;
         this.catalogWebClient = catalogWebClient;
         this.auditWebClient = auditWebClient;
         this.reportWebClient = reportWebClient;
+        this.rabbitAdminWebClient = rabbitAdminWebClient;
     }
 
     @RequestMapping(value = "/orders/**", method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE})
@@ -62,6 +65,12 @@ public class GatewayController {
     @RequestMapping(value = "/report/**", method = RequestMethod.GET)
     public Mono<ResponseEntity<String>> report(HttpServletRequest request) {
         return proxy(reportWebClient, "/report", request, null);
+    }
+
+    /** Administracion de RabbitMQ (colas, exchanges, bindings): solo Admin, ver SecurityConfig. */
+    @RequestMapping(value = "/rabbit/**", method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.DELETE})
+    public Mono<ResponseEntity<String>> rabbit(HttpServletRequest request, @RequestBody(required = false) String body) {
+        return proxy(rabbitAdminWebClient, "/rabbit", request, body);
     }
 
     private Mono<ResponseEntity<String>> proxy(WebClient client, String prefix, HttpServletRequest request, String body) {

@@ -1,0 +1,36 @@
+server:
+  port: 8086
+
+spring:
+  application:
+    name: ms-pedidos360-rabbit-admin
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://login.microsoftonline.com/${AZURE_TENANT_ID:f280f365-653c-4282-b1ee-200e91b01736}/v2.0
+          audiences: ${AZURE_API_CLIENT_ID:08c770a5-21a6-4434-8d59-28723c7c759d}
+
+  # Conexion AMQP al broker (declarar/eliminar colas, exchanges y bindings).
+  # Con un cluster, SPRING_RABBITMQ_ADDRESSES=rabbit1:5672,rabbit2:5672 tiene prioridad sobre host/port.
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASS:guest}
+
+pedidos360:
+  rabbit-admin:
+    # API HTTP de gestion de RabbitMQ: solo se usa para LISTAR colas/exchanges/bindings.
+    management:
+      url: ${RABBITMQ_MANAGEMENT_URL:http://localhost:15672}
+      username: ${RABBITMQ_USER:guest}
+      password: ${RABBITMQ_PASS:guest}
+      vhost: /
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

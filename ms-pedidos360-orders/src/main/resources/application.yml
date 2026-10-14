@@ -29,9 +29,30 @@ spring:
 
 pedidos360:
   messaging:
-    exchange-direct: cmd.direct
-    exchange-dlx: cmd.dead.dlx
+    # Kafka (eventos de dominio)
     topic-orders-events: orders.events
+
+    # RabbitMQ (comandos asincronos). UNICA fuente de nombres: la topologia
+    # (RabbitTopologyConfig), el publicador y los consumidores de ms-notify
+    # leen estas claves; no hay nombres escritos en el codigo.
+    rabbit:
+      exchanges:
+        direct: cmd.direct
+        topic: cmd.topic
+        dead-letter: cmd.dead.dlx
+      queues:
+        email:
+          name: q.cmd.email
+          routing-key: email.send
+          topic-prefix: cmd.email
+        kitchen:
+          name: q.cmd.kitchen
+          routing-key: kitchen.ticket
+          topic-prefix: cmd.kitchen
+        invoice:
+          name: q.cmd.invoice
+          routing-key: invoice.gen
+          topic-prefix: cmd.invoice
   catalog:
     base-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
 
