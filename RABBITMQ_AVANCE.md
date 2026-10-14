@@ -76,8 +76,9 @@ Los listados usan la API HTTP de gestión de RabbitMQ (puerto 15672); las altas/
 
 ## 4. Hecho en la rama `feature/rabbitmq` (Fase B, EP4 — infraestructura, probada en local)
 
-Todo en `infra/`. `docker compose config` valida sin errores; **falta probarlo contra Docker**
-(Docker Desktop estaba apagado al momento de escribirlo).
+Todo en `infra/`. Levantado y verificado con Docker Desktop en local el 2026-10-08
+(resultados en la sección 5.1). Falta el tramo que exige JWT real (`orders` y `rabbit-admin`)
+y el despliegue en el EC2.
 
 | Archivo | Qué hace |
 |---|---|
@@ -106,10 +107,17 @@ Detalles del compose:
   un OOM-kill del kernel tumbaría el contenedor justo en la demo. Footprint esperado ≈ 2 GB.
 
 ### Ojo con esto
-- **Tamaño del EC2**: `Despliegue_AWS_Pedidos360_EP2.md` dice `t3.micro` (913 MB, sin swap);
-  la Fase A de este documento asumía `t3.medium`. Con 913 MB **no cabe** (5 JVM + 2 RabbitMQ + nginx).
-  Hay que confirmar el tipo real de instancia y, si sigue en `t3.micro`, subirla a `t3.small`/`t3.medium`
-  o agregar swap antes de la demo.
+- **Tamaño del EC2**: la instancia se subió a `t3.medium` (2 vCPU / ~3.7 GB), suficiente para el
+  footprint de ~2,3 GB del stack completo. `Despliegue_AWS_Pedidos360_EP2.md` sigue diciendo `t3.micro`
+  (913 MB) en su sección 1.7: **ese dato está obsoleto**, hay que actualizarlo.
+  Pendiente de confirmar en la instancia con `free -h`.
+- **Disco del EC2**: con 5 imágenes Maven multi-stage los 8 GB por defecto del volumen raíz se llenan
+  (`maven:3.9-eclipse-temurin-21` ~900 MB + `eclipse-temurin:21-jre` ~450 MB + `rabbitmq:3.12-management`
+  ~250 MB + capas de build). Ampliar a **30 GB gp3** (lo cubre el free tier) y extender el filesystem
+  con `growpart` + `xfs_growfs`.
+- **El build es el pico de memoria, no el runtime**: `docker compose build` compila en paralelo y cada
+  build de Maven es otra JVM de ~700 MB-1 GB. Serializar con `export COMPOSE_PARALLEL_LIMIT=1` antes
+  de construir, o ir servicio por servicio.
 - `infra/docker-compose.yml` ya traía el contexto de build del frontend en `../../../frontend-pedidos360`,
   que desde `infra/` apunta a `Desktop/`, no a `Desktop/PEDIDOS360/`. En el EC2 funciona por el layout
   de carpetas de allá; **en local hay que levantar solo los servicios que se necesiten**
@@ -133,10 +141,10 @@ Detalles del compose:
 7. Confirmar el tipo de instancia del EC2: en la sesión anterior se subió a **`t3.medium` (3.7 GB)**,
    suficiente para el stack completo (~2 GB); verificar con `free -h`. La IP pública cambió desde la
    última vez (la última conocida, `54.163.21.47`, ya no es confiable).
-8. Desplegar la rama en el EC2 (git pull + rebuild de todas las imágenes) y comprobar que
-   `PATCH /api/orders/{id}/status` funciona (el fix de `-parameters` aún no está desplegado).
-   Ojo: el `docker-compose.yml` del EC2 tiene cambios locales con secretos (Graph, CORS, ruta del
-   frontend) que chocan con el nuevo; conviene moverlos a un `.env` fuera de git.
+8. Desplegar la rama en el EC2 (ver 5.3) y comprobar que `PATCH /api/orders/{id}/status`
+   funciona (el fix de `-parameters` aún no está desplegado).
+   ~~El `docker-compose.yml` del EC2 tiene secretos editados a mano que choca con el nuevo~~ →
+   resuelto: ahora todo sale de `infra/.env` (ver 5.3).
 9. Security Group del EC2: abrir 15672 (y 15673 para mostrar el 2.º nodo) en la demo, o túnel SSH.
 10. Agregar a la guía de presentación (`Guion_Presentacion_EP2.md` / `.docx`) los bloques de RabbitMQ:
     clúster de 2 nodos, 3 colas + DLQ, exchanges direct/topic, docker-compose en la nube.
@@ -167,6 +175,46 @@ Detalles del compose:
   intactos, los 3 consumidores se re-engancharon, `notify` reconectó solo (`Attempting to connect to: [rabbit1:5672,
   rabbit2:5672]`) y un mensaje nuevo publicado por `rabbit2` se procesó. Al hacer `docker start pedidos360-rabbit1`
   el clúster volvió a 2 nodos en ejecución.
+
+#### 5.3 Despliegue en el EC2 — configuración por `.env`
+
+El compose ya no tiene secretos ni rutas del host escritos adentro: salen de `infra/.env`
+(ignorado por git, con plantilla en `infra/.env.example`). Así el `git pull` del EC2 no pisa nada.
+Todas las variables tienen `${VAR:-default}`, de modo que sin `.env` el stack igual levanta.
+
+**Primera vez en el EC2** (hay que hacerlo ANTES del `git pull`, para no perder los valores que hoy
+están editados a mano en el `docker-compose.yml` del servidor):
+
+```bash
+cd ~/ms-pedidos360-backend
+cp infra/docker-compose.yml /tmp/compose-con-secretos.bak   # rescatar los valores actuales
+git stash                                                   # soltar la edicion local
+git fetch origin && git checkout feature/rabbitmq && git pull
+cp infra/.env.example infra/.env
+nano infra/.env   # pegar AZURE_GRAPH_CLIENT_SECRET, AZURE_USER_DOMAIN y CORS_ALLOWED_ORIGINS=https://<IP>
+```
+
+**Rebuild y arranque** (el build es el pico de memoria: serializado, no en paralelo):
+
+```bash
+cd infra
+export COMPOSE_PARALLEL_LIMIT=1
+docker compose build
+docker compose up -d
+bash ../infra/verificar-cluster.sh
+```
+
+Notas:
+- Se corre `cd infra` a propósito: docker compose lee el `.env` del directorio del compose.
+  Desde la raíz hay que pasar `--env-file infra/.env`.
+- Defaults del `.env.example` pensados para el EC2: `FRONTEND_DOCKERFILE=Dockerfile.prebuilt`
+  (el `npm ci`/`ng build` adentro del contenedor tumba la instancia) y
+  `FRONTEND_CONTEXT=../../../frontend-pedidos360`. Para levantar en local hay que descomentar
+  las dos líneas de la sección Frontend del `.env`.
+- `notify` (8083) y `rabbit-admin` (8086) ya **no publican puerto**: son internos a la red de
+  Docker. `notify` no tiene spring-security y solo expone el actuator, así que publicarlo lo dejaba
+  abierto; al `rabbit-admin` solo lo llama el BFF por `/api/rabbit/**`. Para depurarlos:
+  `docker exec pedidos360-notify curl -s localhost:8083/actuator/health`.
 
 #### 5.2 Problema de Docker Desktop en este equipo (por si reaparece)
 Docker Desktop 4.71 no arrancaba: `initializing Inference manager: ... remove ...\AppData\Local\Docker\run\dockerInference:
