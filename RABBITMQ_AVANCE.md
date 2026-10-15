@@ -215,6 +215,31 @@ EC2 `i-0345ad9405c67365a`, `t3.medium`, IP `98.88.19.87`, rama `feature/rabbitmq
   el preflight del cambio de estado. `DELETE` sigue fuera (solo haría falta si el frontend llamara
   al administrador de colas).
 
+#### 5.5 Bug de autorización encontrado al desplegar (corregido, commit `f3ab53f`)
+
+`SecurityConfig` de `orders`, `audit` y `catalog` usaba `requestMatchers("PATCH", ruta)` **sin
+importar `HttpMethod`**. Esa sobrecarga recibe **patrones de ruta, no verbos**, así que `"POST"`,
+`"PATCH"` y `"GET"` se interpretaban como rutas. En `orders` era un agujero real:
+
+```java
+.requestMatchers("POST",  "/api/orders/**")       // -> captura TODOS los metodos
+.requestMatchers("PATCH", "/api/orders/*/status") // -> codigo muerto, nunca se evalua
+```
+
+La primera regla matchea `/api/orders/**` para cualquier método y se evalúa primero → **un CUSTOMER
+podía cambiar el estado de cualquier pedido**. El BFF tampoco lo frenaba (su regla de
+`/api/orders/**` permite los tres roles sin distinguir método). En `audit` y `catalog` el efecto era
+el inverso (más restrictivo de lo previsto), sin impacto de seguridad.
+
+Corregido con `HttpMethod.POST/PATCH/GET/PUT`; en `audit` la regla pasó a ser por ruta porque solo
+expone GETs. Se agregaron **4 pruebas** en `orders` (`SecurityConfigTest`) que fijan las reglas por
+método; el total del backend subió de 33 a **37**. **Verificado que detectan la regresión**: con el
+bug reintroducido a propósito, el `PATCH` de un CUSTOMER devuelve **404 en vez de 403** — o sea pasa
+la autorización y llega al controlador. Desplegado en el EC2.
+
+> **Ojo para la demo**: ahora un CUSTOMER **ya no puede** cambiar estados. El usuario con el que se
+> haga el bloque 4 de la presentación tiene que ser **Admin u Operator**.
+
 **Pendiente en el EC2**: probar el flujo completo con JWT (`PATCH /api/orders/{id}/status` → 3 colas,
 DLQ con `failMode`, y el CRUD de `/api/rabbit/**`). Todo lo demás está verificado.
 
