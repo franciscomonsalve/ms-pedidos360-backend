@@ -146,8 +146,12 @@ Detalles del compose:
    ~~El `docker-compose.yml` del EC2 tiene secretos editados a mano que choca con el nuevo~~ →
    resuelto: ahora todo sale de `infra/.env` (ver 5.3).
 9. Security Group del EC2: abrir 15672 (y 15673 para mostrar el 2.º nodo) en la demo, o túnel SSH.
-10. Agregar a la guía de presentación (`Guion_Presentacion_EP2.md` / `.docx`) los bloques de RabbitMQ:
-    clúster de 2 nodos, 3 colas + DLQ, exchanges direct/topic, docker-compose en la nube.
+10. ~~Guía de presentación con los bloques de RabbitMQ~~ → hecho: **`Guion_Presentacion_EP4.md`**
+    (archivo nuevo, no se tocó el de EP2). Cubre los 11 elementos obligatorios en 9:00 y mapea cada
+    bloque al indicador de la pauta que alimenta. **Ojo con el PDF de EP4**: las "instrucciones
+    específicas" listan 11 cosas a mostrar, pero la pauta con porcentajes evalúa los **mismos 8
+    indicadores de código de EP3** — o sea, la nota se juega mostrando y explicando el código, no
+    solo la demo. Falta: ensayar con cronómetro y, si se quiere, exportarlo a `.docx`.
 
 #### 5.1 Resultados de la prueba local (2026-10-08, Docker Desktop 4.71)
 
@@ -175,6 +179,57 @@ Detalles del compose:
   intactos, los 3 consumidores se re-engancharon, `notify` reconectó solo (`Attempting to connect to: [rabbit1:5672,
   rabbit2:5672]`) y un mensaje nuevo publicado por `rabbit2` se procesó. Al hacer `docker start pedidos360-rabbit1`
   el clúster volvió a 2 nodos en ejecución.
+
+#### 5.4 Verificado EN LA NUBE (2026-10-15)
+
+EC2 `i-0345ad9405c67365a`, `t3.medium`, IP `98.88.19.87`, rama `feature/rabbitmq`, config por `infra/.env`.
+
+- **Clúster**: `rabbit1` y `rabbit2` healthy; `cluster_status` lista ambos como Disk Nodes y Running
+  Nodes, **sin alarmas ni particiones**; 4 CPU cores agregados. `rabbit-init` terminó en 0 y aplicó
+  `ha-all`. Las dos UIs (15672 y 15673) muestran los dos nodos; la esquina superior derecha indica
+  por cuál nodo se entró (`Cluster rabbit@rabbit1` / `rabbit@rabbit2`) → **elemento 8**.
+- **Topología**: `notify` arrancó en 5.9 s con
+  `Attempting to connect to: [rabbit1:5672, rabbit2:5672]` (usa el clúster, no un nodo suelto).
+  `list_queues` muestra las 6 colas con política `ha-all`; `list_exchanges` muestra `cmd.direct`
+  (direct), `cmd.topic` (**topic**) y `cmd.dead.dlx` (direct) → **elementos 9 y 10**.
+- **Security Group**: se abrieron 15672 y 15673 en `sg-00fdffe9c8269bf28 (seg-wrt)`, el mismo que
+  tiene el 8080. Son **solo para la demo**: los servicios hablan por la red interna de Docker.
+  **Cerrarlos al terminar** (la UI va con guest/guest).
+- **Disco**: `docker builder prune -af` + `image prune -af` liberaron 4.6 GB (de 9.4 a 15 GB libres).
+  No hizo falta ampliar el volumen (es de 20 GB, no de 8 como decía el doc de EP2).
+
+- **Stack completo desplegado**: los 8 contenedores arriba (`orders`, `notify`, `rabbit-admin`,
+  `audit`, `bff`, `frontend`, `rabbit1`, `rabbit2`). Salud: bff y audit `{"status":"UP"}`;
+  `orders` responde **401** en `/actuator/health` porque su `SecurityConfig` protege el actuator con
+  JWT (los otros módulos lo dejan abierto — inconsistencia menor, no un fallo); `notify` y
+  `rabbit-admin` responden UP por dentro de la red. Frontend en `https://localhost` → **200**.
+  **3 consumidores** conectados (uno por cola de trabajo) y 2 conexiones AMQP.
+- **Huella real**: 1.6 GB de RAM usados de 3.7 GB, y 13 GB de disco libres de 20 GB. El `t3.medium`
+  queda holgado. Tiempos de arranque: `notify` 5.9 s, `orders` 41 s (JPA + Hibernate + H2) — el
+  chequeo de salud hay que hacerlo después de ~45 s, no antes.
+- **Frontend**: `dist` recompilado con la IP nueva y subido por `scp` a
+  `~/frontend-prebuilt/dist/frontend-pedidos360/browser` (el anterior quedó como `browser.bak-*`),
+  construido con `Dockerfile.prebuilt`.
+- **CORS en API Gateway**: `access-control-allow-methods: GET,PATCH,POST,PUT` ya desplegado.
+  `PATCH` era imprescindible: es el método de `orders.service.ts:48` y sin él el navegador bloquea
+  el preflight del cambio de estado. `DELETE` sigue fuera (solo haría falta si el frontend llamara
+  al administrador de colas).
+
+**Pendiente en el EC2**: probar el flujo completo con JWT (`PATCH /api/orders/{id}/status` → 3 colas,
+DLQ con `failMode`, y el CRUD de `/api/rabbit/**`). Todo lo demás está verificado.
+
+**La clave SSH no era la del Learner Lab**: la instancia se lanzó con un par propio,
+`clave-pedidos360.pem` (ni `labsuser.pem` viejo ni el recién descargado funcionan). Está instalada
+como `labsuser.pem` en la carpeta del proyecto, con permisos restringidos con `icacls`; el original
+de septiembre quedó como `labsuser.pem.bak-20260914`.
+
+**Gotchas del EC2 anotados sobre la marcha**:
+- El Learner Lab regenera el par de claves al reiniciar el entorno: el `labsuser.pem` viejo da
+  `Permission denied (publickey)`. Hay que bajarlo de nuevo (AWS Details → Download PEM).
+- EC2 Instance Connect (terminal del navegador) **se cae por inactividad** y mata lo que esté
+  corriendo. Lanzar los builds con `nohup ... > ~/build.log 2>&1 &` y seguirlos con `tail -f`.
+- El `Dockerfile` usa `mvn -q`: el paso de compilación no imprime nada durante minutos y parece
+  colgado. No lo está.
 
 #### 5.3 Despliegue en el EC2 — configuración por `.env`
 
@@ -238,7 +293,9 @@ diagnóstico se puso `"EnableDockerAI": false` en `%APPDATA%\Docker\settings-sto
 - Repos: `https://github.com/franciscomonsalve/ms-pedidos360-backend` y `.../frontend-pedidos360-`.
   Copias locales: `C:\Users\Gene\Desktop\PEDIDOS360\pedidos360-backend` y `...\frontend-pedidos360`.
 - Compilar y probar: `mvn clean package` (desde la raíz del backend).
-- EC2 (AWS Academy): sin Elastic IP, la IP cambia al parar/prender; el checklist de qué actualizar está en
-  `Despliegue_AWS_Pedidos360_EP2.md`. Última IP usada: `54.163.21.47` (puede haber cambiado).
+- EC2 (AWS Academy): instancia `i-0345ad9405c67365a` (`pedidos360-ec2`), **`t3.medium`**, us-east-1,
+  **sin Elastic IP** → la IP cambia al parar/prender; el checklist de qué actualizar está en
+  `Despliegue_AWS_Pedidos360_EP2.md` sección 2. IP al 2026-10-15: **`98.88.19.87`**
+  (la anterior era `54.163.21.47`). Privada: `172.31.31.31`.
 - Preferencia del usuario: commits **sin** línea de coautoría de IA.
 - La terminal del usuario es PowerShell 5.1: no acepta `&&`.

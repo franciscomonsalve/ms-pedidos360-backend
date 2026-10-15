@@ -1,5 +1,6 @@
 package cl.duoc.pedidos360.catalog.config;
 
+import org.springframework.http.HttpMethod;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -30,8 +31,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 // Endpoint interno usado por orders-svc para descontar stock al aceptar un pedido
-                .requestMatchers("PUT", "/api/catalog/products/*/stock/decrease").hasAnyRole("ADMIN", "OPERATOR", "SERVICE")
-                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/catalog/**").hasAnyRole("ADMIN", "OPERATOR", "CUSTOMER")
+                .requestMatchers(HttpMethod.PUT, "/api/catalog/products/*/stock/decrease").hasAnyRole("ADMIN", "OPERATOR", "SERVICE")
+                .requestMatchers(HttpMethod.GET, "/api/catalog/**").hasAnyRole("ADMIN", "OPERATOR", "CUSTOMER")
                 .requestMatchers("/api/catalog/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )

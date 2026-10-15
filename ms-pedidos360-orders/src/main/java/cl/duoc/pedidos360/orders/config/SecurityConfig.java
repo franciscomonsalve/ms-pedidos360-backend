@@ -1,5 +1,6 @@
 package cl.duoc.pedidos360.orders.config;
 
+import org.springframework.http.HttpMethod;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -47,9 +48,9 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health", "/swagger-ui/**", "/v3/api-docs/**", "/h2-console/**").permitAll()
-                .requestMatchers("POST", "/api/orders/**").hasAnyRole("ADMIN", "OPERATOR", "CUSTOMER")
-                .requestMatchers("PATCH", "/api/orders/*/status").hasAnyRole("ADMIN", "OPERATOR")
-                .requestMatchers("GET", "/api/orders/**").hasAnyRole("ADMIN", "OPERATOR", "CUSTOMER")
+                .requestMatchers(HttpMethod.POST, "/api/orders/**").hasAnyRole("ADMIN", "OPERATOR", "CUSTOMER")
+                .requestMatchers(HttpMethod.PATCH, "/api/orders/*/status").hasAnyRole("ADMIN", "OPERATOR")
+                .requestMatchers(HttpMethod.GET, "/api/orders/**").hasAnyRole("ADMIN", "OPERATOR", "CUSTOMER")
                 .anyRequest().authenticated()
             )
             .oauth2ResourceServer(oauth2 -> oauth2
