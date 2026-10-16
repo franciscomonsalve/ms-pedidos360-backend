@@ -101,6 +101,10 @@ services:
       AZURE_API_CLIENT_ID: ${AZURE_API_CLIENT_ID:-08c770a5-21a6-4434-8d59-28723c7c759d}
       # Los dos nodos del cluster: `addresses` tiene prioridad sobre host/port.
       SPRING_RABBITMQ_ADDRESSES: rabbit1:5672,rabbit2:5672
+      # Reserva de stock en catalog al aceptar un pedido. En false porque catalog NO esta
+      # en este compose; con la llamada activa, toda transicion a ACEPTADO muere con 409.
+      # Ademas orders llamaria sin token y el endpoint exige rol (daria 401).
+      CATALOG_ENABLED: "${CATALOG_ENABLED:-false}"
       JAVA_TOOL_OPTIONS: -Xmx256m -XX:MaxMetaspaceSize=128m
     ports:
       - "8081:8081"

@@ -55,6 +55,9 @@ pedidos360:
           topic-prefix: cmd.invoice
   catalog:
     base-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
+    # Reserva de stock al aceptar un pedido. En false se omite la llamada y se deja un WARN.
+    # Hoy va en false en el EC2: catalog no esta desplegado y orders lo llamaria sin token.
+    enabled: ${CATALOG_ENABLED:true}
 
 management:
   endpoints:
