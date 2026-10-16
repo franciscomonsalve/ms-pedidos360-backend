@@ -364,7 +364,7 @@ diagnóstico se puso `"EnableDockerAI": false` en `%APPDATA%\Docker\settings-sto
 - Compilar y probar: `mvn clean package` (desde la raíz del backend).
 - EC2 (AWS Academy): instancia `i-0345ad9405c67365a` (`pedidos360-ec2`), **`t3.medium`**, us-east-1,
   **sin Elastic IP** → la IP cambia al parar/prender; el checklist de qué actualizar está en
-  `Despliegue_AWS_Pedidos360_EP2.md` sección 2. IP al 2026-10-15: **`98.88.19.87`**
-  (la anterior era `54.163.21.47`). Privada: `172.31.31.31`.
+  `Despliegue_AWS_Pedidos360_EP2.md` sección 2. IP al 2026-10-16: **`100.48.99.104`**
+  (anteriores: `98.88.19.87`, `54.163.21.47` — cambia en cada arranque del Learner Lab). Privada: `172.31.31.31`.
 - Preferencia del usuario: commits **sin** línea de coautoría de IA.
 - La terminal del usuario es PowerShell 5.1: no acepta `&&`.
