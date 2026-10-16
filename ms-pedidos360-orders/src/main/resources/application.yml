@@ -92,7 +92,9 @@ spring:
     url: jdbc:postgresql://${DB_HOST:pedidos360-db.clslztcqqdgp.us-east-1.rds.amazonaws.com}:${DB_PORT:5432}/${DB_NAME:pedidos360_db}?ssl=true&sslmode=require
     driver-class-name: org.postgresql.Driver
     username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:Pedidos360_2026}
+    # Sin valor por defecto a proposito: si falta DB_PASSWORD, el arranque falla con un
+    # error claro en vez de usar una credencial escrita en el repositorio.
+    password: ${DB_PASSWORD:}
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:

@@ -96,7 +96,15 @@ services:
       dockerfile: ms-pedidos360-orders/Dockerfile
     container_name: pedidos360-orders
     environment:
-      SPRING_PROFILES_ACTIVE: dev
+      # dev   -> H2 en memoria: arranca siempre, pero los pedidos se pierden al reiniciar.
+      # cloud -> PostgreSQL en RDS: los pedidos persisten, pero si RDS no esta disponible
+      #          el contenedor NO levanta. Se cambia en infra/.env (ORDERS_PROFILE).
+      SPRING_PROFILES_ACTIVE: ${ORDERS_PROFILE:-dev}
+      DB_HOST: ${DB_HOST:-pedidos360-db.clslztcqqdgp.us-east-1.rds.amazonaws.com}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-pedidos360_db}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-}
       AZURE_TENANT_ID: ${AZURE_TENANT_ID:-f280f365-653c-4282-b1ee-200e91b01736}
       AZURE_API_CLIENT_ID: ${AZURE_API_CLIENT_ID:-08c770a5-21a6-4434-8d59-28723c7c759d}
       # Los dos nodos del cluster: `addresses` tiene prioridad sobre host/port.
