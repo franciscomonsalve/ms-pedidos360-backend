@@ -215,6 +215,50 @@ EC2 `i-0345ad9405c67365a`, `t3.medium`, IP `98.88.19.87`, rama `feature/rabbitmq
   el preflight del cambio de estado. `DELETE` sigue fuera (solo haría falta si el frontend llamara
   al administrador de colas).
 
+#### 5.6 Flujo completo verificado EN LA NUBE (2026-10-16) — EP4 COMPLETO
+
+Dos pedidos recorridos de `CREADO` a `ENTREGADO` desde el frontend, con token de Admin, pasando por
+API Gateway. **12 comandos publicados, 12 procesados**, cero pérdidas.
+
+| Transición | Exchange | Routing key | Cola |
+|---|---|---|---|
+| → ACEPTADO | `cmd.topic` | `cmd.email.aceptado` | email |
+| → ACEPTADO | `cmd.direct` | `kitchen.ticket` | kitchen |
+| → EN_PREPARACION | `cmd.topic` | `cmd.email.en_preparacion` | email |
+| → DESPACHADO | `cmd.topic` | `cmd.email.despachado` | email |
+| → ENTREGADO | `cmd.topic` | `cmd.email.entregado` | email |
+| → ENTREGADO | `cmd.direct` | `invoice.gen` | invoice |
+
+Los `eventId` **coinciden entre publicador y consumidor** (ese es el hilo a señalar en la demo), con
+~177 ms entre publicar y procesar — por eso las colas vuelven a cero antes de que alcances a
+refrescar la UI. Los tres consumidores trabajaron en sus propios hilos (`ntContainer#0/1/2`).
+
+**DLQ: los 4 caminos de error verificados** (publicando al exchange por la API de gestión desde el
+host del EC2 — el contenedor de rabbitmq no trae `curl`):
+
+| Caso | Resultado en el log |
+|---|---|
+| `failMode: transient` | `error transitorio ... Se reintenta una vez (requeue)` → luego `DLQ ... motivo: reintentos agotados` |
+| `failMode: poison` | `DLQ ... motivo: error no recuperable: falla no recuperable simulada` |
+| kitchen sin `items` | `DLQ ... motivo: error no recuperable: el payload no trae 'items'` |
+| cuerpo que no es JSON | `DLQ ... motivo: mensaje invalido: el cuerpo no es un envelope JSON valido` |
+
+Estado final: `email.dlq`=2, `kitchen.dlq`=1, `invoice.dlq`=1, colas principales en 0. Las tres DLQ
+con **réplica sincronizada en `rabbit@rabbit2`** (`ha-all` funcionando sobre las DLQ, no solo sobre
+las colas de trabajo).
+
+> **Antes de presentar**: purgar las colas para que los contadores partan de cero.
+> `docker exec pedidos360-rabbit1 rabbitmqctl purge_queue q.cmd.email.dlq` (y las otras cinco).
+
+**Hallazgos de esta sesión** (ver 5.5 y commits `ae8a4bf`, `545ac69`):
+- La transición a `ACEPTADO` estaba rota en el EC2: `catalog` no está desplegado y la reserva de
+  stock lanzaba 409. Resuelto con el flag `pedidos360.catalog.enabled`.
+- El frontend **nunca tuvo** cómo cambiar el estado de un pedido: `changeStatus()` existía en el
+  servicio pero ningún componente la llamaba. Se agregó la columna con selector y botón.
+- Deuda pendiente: `orders` llama a `catalog` con un `RestTemplate` sin token. Si algún día se
+  despliega `catalog`, hay que implementar autenticación entre servicios (client credentials) antes
+  de volver a poner `CATALOG_ENABLED=true`.
+
 #### 5.5 Bug de autorización encontrado al desplegar (corregido, commit `f3ab53f`)
 
 `SecurityConfig` de `orders`, `audit` y `catalog` usaba `requestMatchers("PATCH", ruta)` **sin
