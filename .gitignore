@@ -18,3 +18,7 @@ application-secrets.yml
 # Sistema operativo
 .DS_Store
 Thumbs.db
+
+# Configuracion local del stack (secretos de Graph, CORS, rutas del host)
+.env
+infra/.env

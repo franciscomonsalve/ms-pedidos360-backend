@@ -19,7 +19,7 @@ services:
     container_name: pedidos360-rabbit1
     hostname: rabbit1                      # define el nombre de nodo: rabbit@rabbit1
     environment:
-      RABBITMQ_ERLANG_COOKIE: pedidos360-cluster-cookie
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-pedidos360-cluster-cookie}
     volumes:
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - rabbit1-data:/var/lib/rabbitmq
@@ -40,7 +40,7 @@ services:
     container_name: pedidos360-rabbit2
     hostname: rabbit2                      # rabbit@rabbit2
     environment:
-      RABBITMQ_ERLANG_COOKIE: pedidos360-cluster-cookie
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-pedidos360-cluster-cookie}
     volumes:
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - rabbit2-data:/var/lib/rabbitmq
@@ -97,10 +97,14 @@ services:
     container_name: pedidos360-orders
     environment:
       SPRING_PROFILES_ACTIVE: dev
-      AZURE_TENANT_ID: f280f365-653c-4282-b1ee-200e91b01736
-      AZURE_API_CLIENT_ID: 08c770a5-21a6-4434-8d59-28723c7c759d
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-f280f365-653c-4282-b1ee-200e91b01736}
+      AZURE_API_CLIENT_ID: ${AZURE_API_CLIENT_ID:-08c770a5-21a6-4434-8d59-28723c7c759d}
       # Los dos nodos del cluster: `addresses` tiene prioridad sobre host/port.
       SPRING_RABBITMQ_ADDRESSES: rabbit1:5672,rabbit2:5672
+      # Reserva de stock en catalog al aceptar un pedido. En false porque catalog NO esta
+      # en este compose; con la llamada activa, toda transicion a ACEPTADO muere con 409.
+      # Ademas orders llamaria sin token y el endpoint exige rol (daria 401).
+      CATALOG_ENABLED: "${CATALOG_ENABLED:-false}"
       JAVA_TOOL_OPTIONS: -Xmx256m -XX:MaxMetaspaceSize=128m
     ports:
       - "8081:8081"
@@ -119,10 +123,12 @@ services:
       SPRING_PROFILES_ACTIVE: dev
       SPRING_RABBITMQ_ADDRESSES: rabbit1:5672,rabbit2:5672
       # Solo para la demo de DLQ: habilita failMode=transient|poison en el payload.
-      PEDIDOS360_SIMULATE_FAILURES: "true"
+      PEDIDOS360_SIMULATE_FAILURES: "${PEDIDOS360_SIMULATE_FAILURES:-true}"
       JAVA_TOOL_OPTIONS: -Xmx192m -XX:MaxMetaspaceSize=128m
-    ports:
-      - "8083:8083"
+    # Sin `ports:` a proposito: notify no tiene endpoints REST ni spring-security,
+    # solo el actuator. Nadie lo llama por HTTP; publicarlo dejaria /actuator abierto.
+    expose:
+      - "8083"
     depends_on:
       rabbit1:
         condition: service_healthy
@@ -136,15 +142,17 @@ services:
     container_name: pedidos360-rabbit-admin
     environment:
       SPRING_PROFILES_ACTIVE: dev
-      AZURE_TENANT_ID: f280f365-653c-4282-b1ee-200e91b01736
-      AZURE_API_CLIENT_ID: 08c770a5-21a6-4434-8d59-28723c7c759d
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-f280f365-653c-4282-b1ee-200e91b01736}
+      AZURE_API_CLIENT_ID: ${AZURE_API_CLIENT_ID:-08c770a5-21a6-4434-8d59-28723c7c759d}
       # Altas/bajas de colas, exchanges y bindings por AMQP.
       SPRING_RABBITMQ_ADDRESSES: rabbit1:5672,rabbit2:5672
       # Los listados usan la API HTTP de gestion (cualquier nodo del cluster sirve).
       RABBITMQ_MANAGEMENT_URL: http://rabbit1:15672
       JAVA_TOOL_OPTIONS: -Xmx192m -XX:MaxMetaspaceSize=128m
-    ports:
-      - "8086:8086"
+    # Sin `ports:` a proposito: al rabbit-admin solo lo llama el BFF por la red
+    # interna (proxy /api/rabbit/**, rol Admin). No necesita exposicion externa.
+    expose:
+      - "8086"
     depends_on:
       rabbit1:
         condition: service_healthy
@@ -158,8 +166,8 @@ services:
     container_name: pedidos360-audit
     environment:
       SPRING_PROFILES_ACTIVE: dev
-      AZURE_TENANT_ID: f280f365-653c-4282-b1ee-200e91b01736
-      AZURE_API_CLIENT_ID: 08c770a5-21a6-4434-8d59-28723c7c759d
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-f280f365-653c-4282-b1ee-200e91b01736}
+      AZURE_API_CLIENT_ID: ${AZURE_API_CLIENT_ID:-08c770a5-21a6-4434-8d59-28723c7c759d}
       JAVA_TOOL_OPTIONS: -Xmx192m -XX:MaxMetaspaceSize=128m
     ports:
       - "8084:8084"
@@ -172,12 +180,20 @@ services:
       dockerfile: ms-pedidos360-bff/Dockerfile
     container_name: pedidos360-bff
     environment:
-      AZURE_TENANT_ID: f280f365-653c-4282-b1ee-200e91b01736
-      AZURE_API_CLIENT_ID: 08c770a5-21a6-4434-8d59-28723c7c759d
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-f280f365-653c-4282-b1ee-200e91b01736}
+      AZURE_API_CLIENT_ID: ${AZURE_API_CLIENT_ID:-08c770a5-21a6-4434-8d59-28723c7c759d}
       ORDERS_SERVICE_URL: http://orders:8081
       AUDIT_SERVICE_URL: http://audit:8084
       # Proxy /api/rabbit/** (solo rol Admin) hacia el microservicio administrador.
       RABBIT_ADMIN_SERVICE_URL: http://rabbit-admin:8086
+      # Microsoft Graph (alta de usuarios en Entra ID) y CORS. Vienen del .env
+      # para no tener secretos en git ni ediciones a mano en el EC2.
+      AZURE_GRAPH_CLIENT_ID: ${AZURE_GRAPH_CLIENT_ID:-}
+      AZURE_GRAPH_CLIENT_SECRET: ${AZURE_GRAPH_CLIENT_SECRET:-}
+      AZURE_USER_DOMAIN: ${AZURE_USER_DOMAIN:-}
+      AZURE_DEFAULT_ROLE: ${AZURE_DEFAULT_ROLE:-Customer}
+      AZURE_SELF_SERVICE_ROLES: ${AZURE_SELF_SERVICE_ROLES:-Customer}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:4200}
       JAVA_TOOL_OPTIONS: -Xmx256m -XX:MaxMetaspaceSize=128m
     ports:
       - "8080:8080"
@@ -190,8 +206,11 @@ services:
 
   frontend:
     build:
-      context: ../../../frontend-pedidos360
-      dockerfile: Dockerfile
+      # El layout de carpetas del EC2 y el local no coinciden, y en el EC2 hay que
+      # usar Dockerfile.prebuilt (el `npm ci`/`ng build` adentro tumba la instancia).
+      # Ambos se fijan en el .env; el default es el del EC2.
+      context: ${FRONTEND_CONTEXT:-../../../frontend-pedidos360}
+      dockerfile: ${FRONTEND_DOCKERFILE:-Dockerfile.prebuilt}
     container_name: pedidos360-frontend
     ports:
       - "80:80"

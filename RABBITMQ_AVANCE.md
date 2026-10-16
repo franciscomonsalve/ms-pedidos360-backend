@@ -76,8 +76,9 @@ Los listados usan la API HTTP de gestión de RabbitMQ (puerto 15672); las altas/
 
 ## 4. Hecho en la rama `feature/rabbitmq` (Fase B, EP4 — infraestructura, probada en local)
 
-Todo en `infra/`. `docker compose config` valida sin errores; **falta probarlo contra Docker**
-(Docker Desktop estaba apagado al momento de escribirlo).
+Todo en `infra/`. Levantado y verificado con Docker Desktop en local el 2026-10-08
+(resultados en la sección 5.1). Falta el tramo que exige JWT real (`orders` y `rabbit-admin`)
+y el despliegue en el EC2.
 
 | Archivo | Qué hace |
 |---|---|
@@ -106,10 +107,17 @@ Detalles del compose:
   un OOM-kill del kernel tumbaría el contenedor justo en la demo. Footprint esperado ≈ 2 GB.
 
 ### Ojo con esto
-- **Tamaño del EC2**: `Despliegue_AWS_Pedidos360_EP2.md` dice `t3.micro` (913 MB, sin swap);
-  la Fase A de este documento asumía `t3.medium`. Con 913 MB **no cabe** (5 JVM + 2 RabbitMQ + nginx).
-  Hay que confirmar el tipo real de instancia y, si sigue en `t3.micro`, subirla a `t3.small`/`t3.medium`
-  o agregar swap antes de la demo.
+- **Tamaño del EC2**: la instancia se subió a `t3.medium` (2 vCPU / ~3.7 GB), suficiente para el
+  footprint de ~2,3 GB del stack completo. `Despliegue_AWS_Pedidos360_EP2.md` sigue diciendo `t3.micro`
+  (913 MB) en su sección 1.7: **ese dato está obsoleto**, hay que actualizarlo.
+  Pendiente de confirmar en la instancia con `free -h`.
+- **Disco del EC2**: con 5 imágenes Maven multi-stage los 8 GB por defecto del volumen raíz se llenan
+  (`maven:3.9-eclipse-temurin-21` ~900 MB + `eclipse-temurin:21-jre` ~450 MB + `rabbitmq:3.12-management`
+  ~250 MB + capas de build). Ampliar a **30 GB gp3** (lo cubre el free tier) y extender el filesystem
+  con `growpart` + `xfs_growfs`.
+- **El build es el pico de memoria, no el runtime**: `docker compose build` compila en paralelo y cada
+  build de Maven es otra JVM de ~700 MB-1 GB. Serializar con `export COMPOSE_PARALLEL_LIMIT=1` antes
+  de construir, o ir servicio por servicio.
 - `infra/docker-compose.yml` ya traía el contexto de build del frontend en `../../../frontend-pedidos360`,
   que desde `infra/` apunta a `Desktop/`, no a `Desktop/PEDIDOS360/`. En el EC2 funciona por el layout
   de carpetas de allá; **en local hay que levantar solo los servicios que se necesiten**
@@ -133,13 +141,17 @@ Detalles del compose:
 7. Confirmar el tipo de instancia del EC2: en la sesión anterior se subió a **`t3.medium` (3.7 GB)**,
    suficiente para el stack completo (~2 GB); verificar con `free -h`. La IP pública cambió desde la
    última vez (la última conocida, `54.163.21.47`, ya no es confiable).
-8. Desplegar la rama en el EC2 (git pull + rebuild de todas las imágenes) y comprobar que
-   `PATCH /api/orders/{id}/status` funciona (el fix de `-parameters` aún no está desplegado).
-   Ojo: el `docker-compose.yml` del EC2 tiene cambios locales con secretos (Graph, CORS, ruta del
-   frontend) que chocan con el nuevo; conviene moverlos a un `.env` fuera de git.
+8. Desplegar la rama en el EC2 (ver 5.3) y comprobar que `PATCH /api/orders/{id}/status`
+   funciona (el fix de `-parameters` aún no está desplegado).
+   ~~El `docker-compose.yml` del EC2 tiene secretos editados a mano que choca con el nuevo~~ →
+   resuelto: ahora todo sale de `infra/.env` (ver 5.3).
 9. Security Group del EC2: abrir 15672 (y 15673 para mostrar el 2.º nodo) en la demo, o túnel SSH.
-10. Agregar a la guía de presentación (`Guion_Presentacion_EP2.md` / `.docx`) los bloques de RabbitMQ:
-    clúster de 2 nodos, 3 colas + DLQ, exchanges direct/topic, docker-compose en la nube.
+10. ~~Guía de presentación con los bloques de RabbitMQ~~ → hecho: **`Guion_Presentacion_EP4.md`**
+    (archivo nuevo, no se tocó el de EP2). Cubre los 11 elementos obligatorios en 9:00 y mapea cada
+    bloque al indicador de la pauta que alimenta. **Ojo con el PDF de EP4**: las "instrucciones
+    específicas" listan 11 cosas a mostrar, pero la pauta con porcentajes evalúa los **mismos 8
+    indicadores de código de EP3** — o sea, la nota se juega mostrando y explicando el código, no
+    solo la demo. Falta: ensayar con cronómetro y, si se quiere, exportarlo a `.docx`.
 
 #### 5.1 Resultados de la prueba local (2026-10-08, Docker Desktop 4.71)
 
@@ -168,6 +180,166 @@ Detalles del compose:
   rabbit2:5672]`) y un mensaje nuevo publicado por `rabbit2` se procesó. Al hacer `docker start pedidos360-rabbit1`
   el clúster volvió a 2 nodos en ejecución.
 
+#### 5.4 Verificado EN LA NUBE (2026-10-15)
+
+EC2 `i-0345ad9405c67365a`, `t3.medium`, IP `98.88.19.87`, rama `feature/rabbitmq`, config por `infra/.env`.
+
+- **Clúster**: `rabbit1` y `rabbit2` healthy; `cluster_status` lista ambos como Disk Nodes y Running
+  Nodes, **sin alarmas ni particiones**; 4 CPU cores agregados. `rabbit-init` terminó en 0 y aplicó
+  `ha-all`. Las dos UIs (15672 y 15673) muestran los dos nodos; la esquina superior derecha indica
+  por cuál nodo se entró (`Cluster rabbit@rabbit1` / `rabbit@rabbit2`) → **elemento 8**.
+- **Topología**: `notify` arrancó en 5.9 s con
+  `Attempting to connect to: [rabbit1:5672, rabbit2:5672]` (usa el clúster, no un nodo suelto).
+  `list_queues` muestra las 6 colas con política `ha-all`; `list_exchanges` muestra `cmd.direct`
+  (direct), `cmd.topic` (**topic**) y `cmd.dead.dlx` (direct) → **elementos 9 y 10**.
+- **Security Group**: se abrieron 15672 y 15673 en `sg-00fdffe9c8269bf28 (seg-wrt)`, el mismo que
+  tiene el 8080. Son **solo para la demo**: los servicios hablan por la red interna de Docker.
+  **Cerrarlos al terminar** (la UI va con guest/guest).
+- **Disco**: `docker builder prune -af` + `image prune -af` liberaron 4.6 GB (de 9.4 a 15 GB libres).
+  No hizo falta ampliar el volumen (es de 20 GB, no de 8 como decía el doc de EP2).
+
+- **Stack completo desplegado**: los 8 contenedores arriba (`orders`, `notify`, `rabbit-admin`,
+  `audit`, `bff`, `frontend`, `rabbit1`, `rabbit2`). Salud: bff y audit `{"status":"UP"}`;
+  `orders` responde **401** en `/actuator/health` porque su `SecurityConfig` protege el actuator con
+  JWT (los otros módulos lo dejan abierto — inconsistencia menor, no un fallo); `notify` y
+  `rabbit-admin` responden UP por dentro de la red. Frontend en `https://localhost` → **200**.
+  **3 consumidores** conectados (uno por cola de trabajo) y 2 conexiones AMQP.
+- **Huella real**: 1.6 GB de RAM usados de 3.7 GB, y 13 GB de disco libres de 20 GB. El `t3.medium`
+  queda holgado. Tiempos de arranque: `notify` 5.9 s, `orders` 41 s (JPA + Hibernate + H2) — el
+  chequeo de salud hay que hacerlo después de ~45 s, no antes.
+- **Frontend**: `dist` recompilado con la IP nueva y subido por `scp` a
+  `~/frontend-prebuilt/dist/frontend-pedidos360/browser` (el anterior quedó como `browser.bak-*`),
+  construido con `Dockerfile.prebuilt`.
+- **CORS en API Gateway**: `access-control-allow-methods: GET,PATCH,POST,PUT` ya desplegado.
+  `PATCH` era imprescindible: es el método de `orders.service.ts:48` y sin él el navegador bloquea
+  el preflight del cambio de estado. `DELETE` sigue fuera (solo haría falta si el frontend llamara
+  al administrador de colas).
+
+#### 5.6 Flujo completo verificado EN LA NUBE (2026-10-16) — EP4 COMPLETO
+
+Dos pedidos recorridos de `CREADO` a `ENTREGADO` desde el frontend, con token de Admin, pasando por
+API Gateway. **12 comandos publicados, 12 procesados**, cero pérdidas.
+
+| Transición | Exchange | Routing key | Cola |
+|---|---|---|---|
+| → ACEPTADO | `cmd.topic` | `cmd.email.aceptado` | email |
+| → ACEPTADO | `cmd.direct` | `kitchen.ticket` | kitchen |
+| → EN_PREPARACION | `cmd.topic` | `cmd.email.en_preparacion` | email |
+| → DESPACHADO | `cmd.topic` | `cmd.email.despachado` | email |
+| → ENTREGADO | `cmd.topic` | `cmd.email.entregado` | email |
+| → ENTREGADO | `cmd.direct` | `invoice.gen` | invoice |
+
+Los `eventId` **coinciden entre publicador y consumidor** (ese es el hilo a señalar en la demo), con
+~177 ms entre publicar y procesar — por eso las colas vuelven a cero antes de que alcances a
+refrescar la UI. Los tres consumidores trabajaron en sus propios hilos (`ntContainer#0/1/2`).
+
+**DLQ: los 4 caminos de error verificados** (publicando al exchange por la API de gestión desde el
+host del EC2 — el contenedor de rabbitmq no trae `curl`):
+
+| Caso | Resultado en el log |
+|---|---|
+| `failMode: transient` | `error transitorio ... Se reintenta una vez (requeue)` → luego `DLQ ... motivo: reintentos agotados` |
+| `failMode: poison` | `DLQ ... motivo: error no recuperable: falla no recuperable simulada` |
+| kitchen sin `items` | `DLQ ... motivo: error no recuperable: el payload no trae 'items'` |
+| cuerpo que no es JSON | `DLQ ... motivo: mensaje invalido: el cuerpo no es un envelope JSON valido` |
+
+Estado final: `email.dlq`=2, `kitchen.dlq`=1, `invoice.dlq`=1, colas principales en 0. Las tres DLQ
+con **réplica sincronizada en `rabbit@rabbit2`** (`ha-all` funcionando sobre las DLQ, no solo sobre
+las colas de trabajo).
+
+> **Antes de presentar**: purgar las colas para que los contadores partan de cero.
+> `docker exec pedidos360-rabbit1 rabbitmqctl purge_queue q.cmd.email.dlq` (y las otras cinco).
+
+**Hallazgos de esta sesión** (ver 5.5 y commits `ae8a4bf`, `545ac69`):
+- La transición a `ACEPTADO` estaba rota en el EC2: `catalog` no está desplegado y la reserva de
+  stock lanzaba 409. Resuelto con el flag `pedidos360.catalog.enabled`.
+- El frontend **nunca tuvo** cómo cambiar el estado de un pedido: `changeStatus()` existía en el
+  servicio pero ningún componente la llamaba. Se agregó la columna con selector y botón.
+- Deuda pendiente: `orders` llama a `catalog` con un `RestTemplate` sin token. Si algún día se
+  despliega `catalog`, hay que implementar autenticación entre servicios (client credentials) antes
+  de volver a poner `CATALOG_ENABLED=true`.
+
+#### 5.5 Bug de autorización encontrado al desplegar (corregido, commit `f3ab53f`)
+
+`SecurityConfig` de `orders`, `audit` y `catalog` usaba `requestMatchers("PATCH", ruta)` **sin
+importar `HttpMethod`**. Esa sobrecarga recibe **patrones de ruta, no verbos**, así que `"POST"`,
+`"PATCH"` y `"GET"` se interpretaban como rutas. En `orders` era un agujero real:
+
+```java
+.requestMatchers("POST",  "/api/orders/**")       // -> captura TODOS los metodos
+.requestMatchers("PATCH", "/api/orders/*/status") // -> codigo muerto, nunca se evalua
+```
+
+La primera regla matchea `/api/orders/**` para cualquier método y se evalúa primero → **un CUSTOMER
+podía cambiar el estado de cualquier pedido**. El BFF tampoco lo frenaba (su regla de
+`/api/orders/**` permite los tres roles sin distinguir método). En `audit` y `catalog` el efecto era
+el inverso (más restrictivo de lo previsto), sin impacto de seguridad.
+
+Corregido con `HttpMethod.POST/PATCH/GET/PUT`; en `audit` la regla pasó a ser por ruta porque solo
+expone GETs. Se agregaron **4 pruebas** en `orders` (`SecurityConfigTest`) que fijan las reglas por
+método; el total del backend subió de 33 a **37**. **Verificado que detectan la regresión**: con el
+bug reintroducido a propósito, el `PATCH` de un CUSTOMER devuelve **404 en vez de 403** — o sea pasa
+la autorización y llega al controlador. Desplegado en el EC2.
+
+> **Ojo para la demo**: ahora un CUSTOMER **ya no puede** cambiar estados. El usuario con el que se
+> haga el bloque 4 de la presentación tiene que ser **Admin u Operator**.
+
+**Pendiente en el EC2**: probar el flujo completo con JWT (`PATCH /api/orders/{id}/status` → 3 colas,
+DLQ con `failMode`, y el CRUD de `/api/rabbit/**`). Todo lo demás está verificado.
+
+**La clave SSH no era la del Learner Lab**: la instancia se lanzó con un par propio,
+`clave-pedidos360.pem` (ni `labsuser.pem` viejo ni el recién descargado funcionan). Está instalada
+como `labsuser.pem` en la carpeta del proyecto, con permisos restringidos con `icacls`; el original
+de septiembre quedó como `labsuser.pem.bak-20260914`.
+
+**Gotchas del EC2 anotados sobre la marcha**:
+- El Learner Lab regenera el par de claves al reiniciar el entorno: el `labsuser.pem` viejo da
+  `Permission denied (publickey)`. Hay que bajarlo de nuevo (AWS Details → Download PEM).
+- EC2 Instance Connect (terminal del navegador) **se cae por inactividad** y mata lo que esté
+  corriendo. Lanzar los builds con `nohup ... > ~/build.log 2>&1 &` y seguirlos con `tail -f`.
+- El `Dockerfile` usa `mvn -q`: el paso de compilación no imprime nada durante minutos y parece
+  colgado. No lo está.
+
+#### 5.3 Despliegue en el EC2 — configuración por `.env`
+
+El compose ya no tiene secretos ni rutas del host escritos adentro: salen de `infra/.env`
+(ignorado por git, con plantilla en `infra/.env.example`). Así el `git pull` del EC2 no pisa nada.
+Todas las variables tienen `${VAR:-default}`, de modo que sin `.env` el stack igual levanta.
+
+**Primera vez en el EC2** (hay que hacerlo ANTES del `git pull`, para no perder los valores que hoy
+están editados a mano en el `docker-compose.yml` del servidor):
+
+```bash
+cd ~/ms-pedidos360-backend
+cp infra/docker-compose.yml /tmp/compose-con-secretos.bak   # rescatar los valores actuales
+git stash                                                   # soltar la edicion local
+git fetch origin && git checkout feature/rabbitmq && git pull
+cp infra/.env.example infra/.env
+nano infra/.env   # pegar AZURE_GRAPH_CLIENT_SECRET, AZURE_USER_DOMAIN y CORS_ALLOWED_ORIGINS=https://<IP>
+```
+
+**Rebuild y arranque** (el build es el pico de memoria: serializado, no en paralelo):
+
+```bash
+cd infra
+export COMPOSE_PARALLEL_LIMIT=1
+docker compose build
+docker compose up -d
+bash ../infra/verificar-cluster.sh
+```
+
+Notas:
+- Se corre `cd infra` a propósito: docker compose lee el `.env` del directorio del compose.
+  Desde la raíz hay que pasar `--env-file infra/.env`.
+- Defaults del `.env.example` pensados para el EC2: `FRONTEND_DOCKERFILE=Dockerfile.prebuilt`
+  (el `npm ci`/`ng build` adentro del contenedor tumba la instancia) y
+  `FRONTEND_CONTEXT=../../../frontend-pedidos360`. Para levantar en local hay que descomentar
+  las dos líneas de la sección Frontend del `.env`.
+- `notify` (8083) y `rabbit-admin` (8086) ya **no publican puerto**: son internos a la red de
+  Docker. `notify` no tiene spring-security y solo expone el actuator, así que publicarlo lo dejaba
+  abierto; al `rabbit-admin` solo lo llama el BFF por `/api/rabbit/**`. Para depurarlos:
+  `docker exec pedidos360-notify curl -s localhost:8083/actuator/health`.
+
 #### 5.2 Problema de Docker Desktop en este equipo (por si reaparece)
 Docker Desktop 4.71 no arrancaba: `initializing Inference manager: ... remove ...\AppData\Local\Docker\run\dockerInference:
 El sistema no tiene acceso al archivo` (un socket viejo que Windows no deja borrar, error 1920). Se resolvió
@@ -190,7 +362,9 @@ diagnóstico se puso `"EnableDockerAI": false` en `%APPDATA%\Docker\settings-sto
 - Repos: `https://github.com/franciscomonsalve/ms-pedidos360-backend` y `.../frontend-pedidos360-`.
   Copias locales: `C:\Users\Gene\Desktop\PEDIDOS360\pedidos360-backend` y `...\frontend-pedidos360`.
 - Compilar y probar: `mvn clean package` (desde la raíz del backend).
-- EC2 (AWS Academy): sin Elastic IP, la IP cambia al parar/prender; el checklist de qué actualizar está en
-  `Despliegue_AWS_Pedidos360_EP2.md`. Última IP usada: `54.163.21.47` (puede haber cambiado).
+- EC2 (AWS Academy): instancia `i-0345ad9405c67365a` (`pedidos360-ec2`), **`t3.medium`**, us-east-1,
+  **sin Elastic IP** → la IP cambia al parar/prender; el checklist de qué actualizar está en
+  `Despliegue_AWS_Pedidos360_EP2.md` sección 2. IP al 2026-10-15: **`98.88.19.87`**
+  (la anterior era `54.163.21.47`). Privada: `172.31.31.31`.
 - Preferencia del usuario: commits **sin** línea de coautoría de IA.
 - La terminal del usuario es PowerShell 5.1: no acepta `&&`.

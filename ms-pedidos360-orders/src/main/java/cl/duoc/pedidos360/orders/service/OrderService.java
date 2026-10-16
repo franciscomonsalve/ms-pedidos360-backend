@@ -7,6 +7,8 @@ import cl.duoc.pedidos360.orders.entity.OrderStatus;
 import cl.duoc.pedidos360.orders.messaging.CommandPublisher;
 import cl.duoc.pedidos360.orders.messaging.OrderEventPublisher;
 import cl.duoc.pedidos360.orders.repository.OrderRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +24,8 @@ import java.util.List;
 @Service
 public class OrderService {
 
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
+
     private final OrderRepository orderRepository;
     private final CommandPublisher commandPublisher;
     private final OrderEventPublisher orderEventPublisher;
@@ -29,6 +33,22 @@ public class OrderService {
 
     @Value("${pedidos360.catalog.base-url}")
     private String catalogBaseUrl;
+
+    /**
+     * Reserva de stock contra ms-pedidos360-catalog al aceptar un pedido.
+     *
+     * <p>Se puede apagar porque hoy el catalogo NO esta desplegado en el EC2 (no esta en el
+     * docker-compose) y, aunque lo estuviera, {@code orders} lo llama con un RestTemplate sin
+     * token: el endpoint de descuento exige rol ADMIN/OPERATOR/SERVICE, asi que responderia 401.
+     * Con la llamada activa, cualquier transicion a ACEPTADO falla con 409 y el pedido se queda
+     * bloqueado en CREADO.
+     *
+     * <p>Apagarlo es explicito a proposito: no se silencia un fallo del catalogo cuando el
+     * catalogo SI esta disponible. Cuando se despliegue y tenga autenticacion entre servicios,
+     * se vuelve a poner en true.
+     */
+    @Value("${pedidos360.catalog.enabled:true}")
+    private boolean catalogEnabled;
 
     public OrderService(OrderRepository orderRepository,
                          CommandPublisher commandPublisher,
@@ -117,6 +137,11 @@ public class OrderService {
     }
 
     private void decreaseStockOnCatalog(Order order) {
+        if (!catalogEnabled) {
+            log.warn("Reserva de stock omitida (pedidos360.catalog.enabled=false) orderId={} items={}",
+                    order.getId(), order.getItems().size());
+            return;
+        }
         try {
             for (OrderItem item : order.getItems()) {
                 restTemplate.put(
