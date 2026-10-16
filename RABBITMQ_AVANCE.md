@@ -259,6 +259,31 @@ las colas de trabajo).
   despliega `catalog`, hay que implementar autenticación entre servicios (client credentials) antes
   de volver a poner `CATALOG_ENABLED=true`.
 
+#### 5.7 Persistencia: orders en PostgreSQL (RDS), conmutable a H2
+
+Motivo: el Learner Lab apaga la instancia al cerrar la sesión y con H2 en memoria los pedidos se
+pierden. Pasó el 2026-10-15 en plena sesión de trabajo.
+
+- `SPRING_PROFILES_ACTIVE` de orders sale de **`ORDERS_PROFILE`** en `infra/.env`:
+  `dev` = H2 en memoria · `cloud` = PostgreSQL en RDS. Hoy está en `cloud`.
+- **Plan de rescate para el día de la presentación.** RDS también la apaga el Learner Lab, y si no
+  está disponible `orders` **no levanta**. Volver a H2 son dos comandos (~40 s):
+  ```bash
+  sed -i 's/^ORDERS_PROFILE=.*/ORDERS_PROFILE=dev/' infra/.env
+  docker compose up -d --force-recreate orders
+  ```
+  Conviene llevarlo anotado. Creas un pedido nuevo y sigues: crear un pedido en vivo es, de hecho,
+  el elemento 3 de la rúbrica.
+- **Contraseña fuera del repo**: `application.yml` traía `${DB_PASSWORD:Pedidos360_2026}`, con la
+  credencial real como default y publicada en GitHub. Ahora es `${DB_PASSWORD:}` sin default; el
+  valor vive solo en `infra/.env`. **Sigue estando en el historial de git**: lo correcto sería
+  rotarla en RDS.
+- **Verificado el 2026-10-16**: ciclo completo `CREADO → ENTREGADO` desde el frontend (6 comandos:
+  4 email por topic, 1 kitchen y 1 invoice por direct), luego `docker compose restart orders`, y el
+  pedido **seguía en la base** (`id=1, ENTREGADO, 50000.00`). orders arranca en ~12 s con `cloud`.
+- `audit` y `catalog` siguen en H2: el perfil `cloud` de `audit` apunta a **Oracle** con credenciales
+  `changeme`, sin configurar.
+
 #### 5.5 Bug de autorización encontrado al desplegar (corregido, commit `f3ab53f`)
 
 `SecurityConfig` de `orders`, `audit` y `catalog` usaba `requestMatchers("PATCH", ruta)` **sin
