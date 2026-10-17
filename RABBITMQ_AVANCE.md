@@ -148,9 +148,8 @@ está en 5.4 (clúster y topología), 5.6 (flujo completo y DLQ) y 5.7 (persiste
 
 ### Pendiente de verdad
 
-1. **Probar el `rabbit-admin` contra el broker real**: el CRUD de `/api/rabbit/**` (colas,
-   exchanges, bindings, listados, `exchangeDeclarePassive`) exige JWT de Admin y **nunca se ejecutó
-   fuera de las 24 pruebas unitarias**. Es el único tramo del código sin verificación en la nube.
+1. ~~Probar el `rabbit-admin` contra el broker real~~ → **hecho** (sección 5.8). **Ya no queda
+   código sin verificar en la nube.**
 2. **Ensayar la presentación con cronómetro.** El guion suma 9:00 sobre un tope de 10, y el bloque 4
    son cuatro clicks. Ensayar también el `docker stop pedidos360-rabbit1` para saber cuánto tarda en
    remontar.
@@ -288,6 +287,46 @@ las colas de trabajo).
 - Deuda pendiente: `orders` llama a `catalog` con un `RestTemplate` sin token. Si algún día se
   despliega `catalog`, hay que implementar autenticación entre servicios (client credentials) antes
   de volver a poner `CATALOG_ENABLED=true`.
+
+#### 5.8 `rabbit-admin` verificado contra el broker real (2026-10-17)
+
+Último tramo sin probar fuera de las pruebas unitarias. Se ejecutó vía API Gateway → BFF →
+`rabbit-admin` con token de Admin, sobre el EC2 en `54.87.219.117`.
+
+**Endpoints REST (indicador 13%)** — ciclo completo de alta, consulta, uso y baja:
+
+| Operación | Código | Observación |
+|---|---|---|
+| `POST /queues` | **201** | Crea `q.demo` **y** su `q.demo.dlq` |
+| `POST /exchanges` | **201** | `ex.demo` tipo TOPIC |
+| `POST /bindings` | **201** | `q.demo` ← `ex.demo` con `demo.#` |
+| `POST /messages` | **202** | Devuelve el `eventId` |
+| `GET /queues/q.demo` | **200** | `messageCount: 1` tras publicar → **el binding enruta de verdad** |
+| `GET /exchanges`, `GET /bindings` | **200** | Listados vía API HTTP de gestión |
+| `DELETE` de binding, cola y exchange | **204** | Y después **404** al consultar |
+
+Verbos y códigos coherentes: 201 en creación, 202 en publicación asíncrona, 204 en borrado.
+
+**Validación de entrada (indicador 7%)** — los siete casos de error:
+
+```
+nombre vacio          -> 400  "el nombre de la cola es obligatorio"
+"mi cola!"            -> 400  con el patron permitido explicado
+amq.fanout            -> 400  "El prefijo 'amq.' esta reservado por RabbitMQ"
+tipo faltante         -> 400  "el tipo es obligatorio (DIRECT, TOPIC, FANOUT o HEADERS)"
+cola duplicada        -> 409  "La cola 'q.demo' ya existe"
+cola inexistente      -> 404
+DELETE amq.topic      -> 400  (reservado)
+```
+
+Los 400 incluyen un array `details` con `field` y `message` por cada violación.
+
+> **Anécdota útil para la demo**: el primer intento de `POST /queues` falló con **400** porque el
+> payload traía `deadLetterExchange` sin `withDeadLetter: true`. La validación atrapó un error real,
+> no uno fabricado para la presentación.
+
+**Limpieza**: se borraron `q.demo`, `q.demo.dlq`, `ex.demo` y el binding. El broker quedó con las
+6 colas originales en cero y solo los 3 exchanges propios.
 
 #### 5.7 Persistencia: orders en PostgreSQL (RDS), conmutable a H2
 
