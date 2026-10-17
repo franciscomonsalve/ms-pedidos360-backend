@@ -1,0 +1,267 @@
+{
+  "family": "pedidos360",
+  "requiresCompatibilities": ["EC2"],
+  "networkMode": "host",
+  "cpu": "2048",
+  "memory": "3300",
+  "executionRoleArn": "REEMPLAZAR_ARN_LabRole",
+  "taskRoleArn": "REEMPLAZAR_ARN_LabRole",
+
+  "volumes": [
+    { "name": "rabbit1-data", "host": { "sourcePath": "/opt/pedidos360/rabbit1" } },
+    { "name": "rabbit2-data", "host": { "sourcePath": "/opt/pedidos360/rabbit2" } },
+    { "name": "rabbit-conf",  "host": { "sourcePath": "/opt/pedidos360/conf" } }
+  ],
+
+  "containerDefinitions": [
+    {
+      "name": "rabbit1",
+      "image": "rabbitmq:3.12-management",
+      "essential": true,
+      "memoryReservation": 400,
+      "environment": [
+        { "name": "RABBITMQ_NODENAME", "value": "rabbit1@localhost" },
+        { "name": "RABBITMQ_DIST_PORT", "value": "25672" },
+        { "name": "RABBITMQ_CONFIG_FILE", "value": "/etc/rabbitmq-custom/rabbit1.conf" },
+        { "name": "RABBITMQ_ERLANG_COOKIE", "value": "pedidos360-cluster-cookie" }
+      ],
+      "mountPoints": [
+        { "sourceVolume": "rabbit1-data", "containerPath": "/var/lib/rabbitmq" },
+        { "sourceVolume": "rabbit-conf",  "containerPath": "/etc/rabbitmq-custom", "readOnly": true }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "rabbitmq-diagnostics -q check_running"],
+        "interval": 15,
+        "timeout": 10,
+        "retries": 10,
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/pedidos360",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "rabbit1",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+
+    {
+      "name": "rabbit2",
+      "image": "rabbitmq:3.12-management",
+      "essential": true,
+      "memoryReservation": 400,
+      "dependsOn": [{ "containerName": "rabbit1", "condition": "HEALTHY" }],
+      "environment": [
+        { "name": "RABBITMQ_NODENAME", "value": "rabbit2@localhost" },
+        { "name": "RABBITMQ_DIST_PORT", "value": "25673" },
+        { "name": "RABBITMQ_CONFIG_FILE", "value": "/etc/rabbitmq-custom/rabbit2.conf" },
+        { "name": "RABBITMQ_ERLANG_COOKIE", "value": "pedidos360-cluster-cookie" }
+      ],
+      "mountPoints": [
+        { "sourceVolume": "rabbit2-data", "containerPath": "/var/lib/rabbitmq" },
+        { "sourceVolume": "rabbit-conf",  "containerPath": "/etc/rabbitmq-custom", "readOnly": true }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "rabbitmq-diagnostics -q check_running"],
+        "interval": 15,
+        "timeout": 10,
+        "retries": 10,
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/pedidos360",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "rabbit2",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+
+    {
+      "name": "rabbit-init",
+      "image": "curlimages/curl:8.8.0",
+      "essential": false,
+      "memoryReservation": 32,
+      "dependsOn": [
+        { "containerName": "rabbit1", "condition": "HEALTHY" },
+        { "containerName": "rabbit2", "condition": "HEALTHY" }
+      ],
+      "entryPoint": ["sh", "-c"],
+      "command": [
+        "set -e; echo '== Politica ha-all: replica de q.cmd.* en los 2 nodos =='; curl -sS -f -u guest:guest -H 'content-type: application/json' -X PUT 'http://localhost:15672/api/policies/%2F/ha-all' --data @/etc/rabbitmq-custom/ha-policy.json; echo '   politica aplicada'; echo '== Nodos del cluster =='; curl -sS -f -u guest:guest 'http://localhost:15672/api/nodes?columns=name,running'; echo ''"
+      ],
+      "mountPoints": [
+        { "sourceVolume": "rabbit-conf", "containerPath": "/etc/rabbitmq-custom", "readOnly": true }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/pedidos360",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "rabbit-init",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+
+    {
+      "name": "orders",
+      "image": "REEMPLAZAR_ECR/pedidos360-orders:latest",
+      "essential": true,
+      "memoryReservation": 420,
+      "dependsOn": [{ "containerName": "rabbit1", "condition": "HEALTHY" }],
+      "environment": [
+        { "name": "SPRING_PROFILES_ACTIVE", "value": "cloud" },
+        { "name": "DB_HOST", "value": "pedidos360-db.clslztcqqdgp.us-east-1.rds.amazonaws.com" },
+        { "name": "DB_PORT", "value": "5432" },
+        { "name": "DB_NAME", "value": "pedidos360_db" },
+        { "name": "DB_USER", "value": "postgres" },
+        { "name": "AZURE_TENANT_ID", "value": "f280f365-653c-4282-b1ee-200e91b01736" },
+        { "name": "AZURE_API_CLIENT_ID", "value": "08c770a5-21a6-4434-8d59-28723c7c759d" },
+        { "name": "SPRING_RABBITMQ_ADDRESSES", "value": "localhost:5672,localhost:5673" },
+        { "name": "CATALOG_ENABLED", "value": "false" },
+        { "name": "JAVA_TOOL_OPTIONS", "value": "-Xmx256m -XX:MaxMetaspaceSize=128m" }
+      ],
+      "secrets": [
+        { "name": "DB_PASSWORD", "valueFrom": "/pedidos360/DB_PASSWORD" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/pedidos360",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "orders",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+
+    {
+      "name": "notify",
+      "image": "REEMPLAZAR_ECR/pedidos360-notify:latest",
+      "essential": true,
+      "memoryReservation": 380,
+      "dependsOn": [{ "containerName": "rabbit1", "condition": "HEALTHY" }],
+      "environment": [
+        { "name": "SPRING_PROFILES_ACTIVE", "value": "dev" },
+        { "name": "SPRING_RABBITMQ_ADDRESSES", "value": "localhost:5672,localhost:5673" },
+        { "name": "PEDIDOS360_SIMULATE_FAILURES", "value": "true" },
+        { "name": "JAVA_TOOL_OPTIONS", "value": "-Xmx192m -XX:MaxMetaspaceSize=128m" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/pedidos360",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "notify",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+
+    {
+      "name": "rabbit-admin",
+      "image": "REEMPLAZAR_ECR/pedidos360-rabbit-admin:latest",
+      "essential": true,
+      "memoryReservation": 380,
+      "dependsOn": [{ "containerName": "rabbit1", "condition": "HEALTHY" }],
+      "environment": [
+        { "name": "SPRING_PROFILES_ACTIVE", "value": "dev" },
+        { "name": "AZURE_TENANT_ID", "value": "f280f365-653c-4282-b1ee-200e91b01736" },
+        { "name": "AZURE_API_CLIENT_ID", "value": "08c770a5-21a6-4434-8d59-28723c7c759d" },
+        { "name": "SPRING_RABBITMQ_ADDRESSES", "value": "localhost:5672,localhost:5673" },
+        { "name": "RABBITMQ_MANAGEMENT_URL", "value": "http://localhost:15672" },
+        { "name": "JAVA_TOOL_OPTIONS", "value": "-Xmx192m -XX:MaxMetaspaceSize=128m" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/pedidos360",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "rabbit-admin",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+
+    {
+      "name": "audit",
+      "image": "REEMPLAZAR_ECR/pedidos360-audit:latest",
+      "essential": true,
+      "memoryReservation": 380,
+      "environment": [
+        { "name": "SPRING_PROFILES_ACTIVE", "value": "dev" },
+        { "name": "AZURE_TENANT_ID", "value": "f280f365-653c-4282-b1ee-200e91b01736" },
+        { "name": "AZURE_API_CLIENT_ID", "value": "08c770a5-21a6-4434-8d59-28723c7c759d" },
+        { "name": "JAVA_TOOL_OPTIONS", "value": "-Xmx192m -XX:MaxMetaspaceSize=128m" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/pedidos360",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "audit",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+
+    {
+      "name": "bff",
+      "image": "REEMPLAZAR_ECR/pedidos360-bff:latest",
+      "essential": true,
+      "memoryReservation": 420,
+      "dependsOn": [
+        { "containerName": "orders", "condition": "START" },
+        { "containerName": "audit", "condition": "START" },
+        { "containerName": "rabbit-admin", "condition": "START" }
+      ],
+      "environment": [
+        { "name": "AZURE_TENANT_ID", "value": "f280f365-653c-4282-b1ee-200e91b01736" },
+        { "name": "AZURE_API_CLIENT_ID", "value": "08c770a5-21a6-4434-8d59-28723c7c759d" },
+        { "name": "ORDERS_SERVICE_URL", "value": "http://localhost:8081" },
+        { "name": "AUDIT_SERVICE_URL", "value": "http://localhost:8084" },
+        { "name": "RABBIT_ADMIN_SERVICE_URL", "value": "http://localhost:8086" },
+        { "name": "AZURE_GRAPH_CLIENT_ID", "value": "08c770a5-21a6-4434-8d59-28723c7c759d" },
+        { "name": "AZURE_USER_DOMAIN", "value": "ActividadClauodNative123.onmicrosoft.com" },
+        { "name": "AZURE_DEFAULT_ROLE", "value": "Customer" },
+        { "name": "AZURE_SELF_SERVICE_ROLES", "value": "Customer" },
+        { "name": "CORS_ALLOWED_ORIGINS", "value": "REEMPLAZAR_https://IP_DEL_EC2" },
+        { "name": "JAVA_TOOL_OPTIONS", "value": "-Xmx256m -XX:MaxMetaspaceSize=128m" }
+      ],
+      "secrets": [
+        { "name": "AZURE_GRAPH_CLIENT_SECRET", "valueFrom": "/pedidos360/AZURE_GRAPH_CLIENT_SECRET" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/pedidos360",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "bff",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+
+    {
+      "name": "frontend",
+      "image": "REEMPLAZAR_ECR/pedidos360-frontend:latest",
+      "essential": true,
+      "memoryReservation": 64,
+      "dependsOn": [{ "containerName": "bff", "condition": "START" }],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/pedidos360",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "frontend",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}
