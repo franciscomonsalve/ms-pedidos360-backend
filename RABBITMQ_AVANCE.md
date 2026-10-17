@@ -126,32 +126,62 @@ Detalles del compose:
   eliminan a favor de quorum queues). Para la demo sirve y no requiere tocar el código Java; migrar a
   quorum queues implicaría declarar `x-queue-type: quorum` en `RabbitTopologyConfig`.
 
-## 5. Pendiente
+## 5. Estado y pendientes
 
-### Fase B — EP4 (nube) — probada en local con Docker; falta desplegar en el EC2
-1. ~~2 nodos RabbitMQ en clúster con política de réplica~~ → hecho y **verificado** (sección 5.1).
-2. ~~Servicios `notify` y `rabbit-admin` en el compose + variables de entorno~~ → hecho.
-3. ~~Probar el clúster con Docker en local~~ → **hecho** (sección 5.1).
-4. ~~Probar el flujo de mensajes contra un broker real (3 colas, DLQ, reintento)~~ → **hecho** con
-   `notify` + clúster (sección 5.1). **Falta** el tramo `orders` → `notify` (`PATCH /api/orders/{id}/status`),
-   que exige un JWT real: se prueba en el EC2 con un token de Admin.
-5. ~~Tolerancia a fallos: apagar `rabbit1`~~ → **hecho** (sección 5.1).
-6. **Probar `rabbit-admin`** (crear/eliminar colas, exchanges y bindings, `GET` de listados,
-   `exchangeDeclarePassive`) contra el broker real; también exige JWT de Admin → hacerlo en el EC2.
-7. Confirmar el tipo de instancia del EC2: en la sesión anterior se subió a **`t3.medium` (3.7 GB)**,
-   suficiente para el stack completo (~2 GB); verificar con `free -h`. La IP pública cambió desde la
-   última vez (la última conocida, `54.163.21.47`, ya no es confiable).
-8. Desplegar la rama en el EC2 (ver 5.3) y comprobar que `PATCH /api/orders/{id}/status`
-   funciona (el fix de `-parameters` aún no está desplegado).
-   ~~El `docker-compose.yml` del EC2 tiene secretos editados a mano que choca con el nuevo~~ →
-   resuelto: ahora todo sale de `infra/.env` (ver 5.3).
-9. Security Group del EC2: abrir 15672 (y 15673 para mostrar el 2.º nodo) en la demo, o túnel SSH.
-10. ~~Guía de presentación con los bloques de RabbitMQ~~ → hecho: **`Guion_Presentacion_EP4.md`**
-    (archivo nuevo, no se tocó el de EP2). Cubre los 11 elementos obligatorios en 9:00 y mapea cada
-    bloque al indicador de la pauta que alimenta. **Ojo con el PDF de EP4**: las "instrucciones
-    específicas" listan 11 cosas a mostrar, pero la pauta con porcentajes evalúa los **mismos 8
-    indicadores de código de EP3** — o sea, la nota se juega mostrando y explicando el código, no
-    solo la demo. Falta: ensayar con cronómetro y, si se quiere, exportarlo a `.docx`.
+### Fase B — EP4: **completa y verificada en la nube** (2026-10-16)
+
+Los 11 elementos obligatorios de EP4 están demostrables en el EC2. El detalle de cada verificación
+está en 5.4 (clúster y topología), 5.6 (flujo completo y DLQ) y 5.7 (persistencia).
+
+| # | Elemento de EP4 | Dónde se muestra |
+|---|---|---|
+| 1-2 | API Manager e integraciones | Consola de API Gateway |
+| 3 | Frontend consume vía API Manager | Pantalla de Pedidos + F12 Network |
+| 4 | API Manager valida JWT | Postman: 200 / 401 / 403 |
+| 5 | Tenant IDaaS con usuarios | Entra ID → Users and groups |
+| 6 | OAuth2/OIDC con PKCE | Login en vivo + Network |
+| 7 | Backend y frontend desplegados | `docker compose ps` (8 contenedores) |
+| 8 | Dos nodos en clúster | `rabbitmqctl cluster_status` + UIs 15672/15673 |
+| 9 | 3 colas con DLQ **funcionando** | UI → Queues + `bash infra/demo-dlq.sh` |
+| 10 | Exchanges direct y topic | UI → Exchanges, columna Type |
+| 11 | docker-compose levantando RabbitMQ | El compose + `docker compose ps` |
+
+### Pendiente de verdad
+
+1. **Probar el `rabbit-admin` contra el broker real**: el CRUD de `/api/rabbit/**` (colas,
+   exchanges, bindings, listados, `exchangeDeclarePassive`) exige JWT de Admin y **nunca se ejecutó
+   fuera de las 24 pruebas unitarias**. Es el único tramo del código sin verificación en la nube.
+2. **Ensayar la presentación con cronómetro.** El guion suma 9:00 sobre un tope de 10, y el bloque 4
+   son cuatro clicks. Ensayar también el `docker stop pedidos360-rabbit1` para saber cuánto tarda en
+   remontar.
+3. **Purgar las colas antes de presentar**: `bash infra/demo-dlq.sh --solo-purgar`.
+4. **Contar con que la IP cambie otra vez.** El Learner Lab apaga la instancia al cerrar la sesión.
+   Checklist en `Despliegue_AWS_Pedidos360_EP2.md` sección 2, con los dos tropiezos ya documentados:
+   el **`:8080`** que se pierde al reescribir las integraciones, y las reglas de 15672/15673 atadas
+   a **"Mi IP"**. Arrancar también **RDS**, que el laboratorio apaga igual.
+5. **Rotar la contraseña de la base en RDS.** Se quitó del código (5.7), pero sigue en el historial
+   de git.
+
+### Deuda técnica consciente
+
+- **`orders` llama a `catalog` sin token** (`new RestTemplate()` sin interceptor). Por eso
+  `CATALOG_ENABLED=false`: con la llamada activa, toda transición a `ACEPTADO` moría con 409. Si
+  algún día se despliega `catalog`, hay que implementar autenticación entre servicios antes de
+  volver a activarlo.
+- **`bff`, `catalog` y `audit` siguen con 0 pruebas.** `orders` pasó de 0 a 10 en esta sesión;
+  el total del backend es **43**.
+- **Idempotencia de `notify` en memoria**: se pierde al reiniciar. Suficiente para el alcance.
+- **Colas espejadas clásicas** (`ha-mode`): deprecadas en 3.12, eliminadas en 4.x. Migrar sería
+  declarar `x-queue-type: quorum` en `RabbitTopologyConfig`.
+- **El perfil `cloud` de `audit` apunta a Oracle** con credenciales `changeme`, sin configurar.
+
+### Scripts de apoyo en `infra/`
+
+| Script | Para qué |
+|---|---|
+| `verificar-cluster.sh` | Los 7 chequeos del clúster: nodos, política, colas+DLQ, exchanges, bindings, réplicas |
+| `demo-dlq.sh` | Publica los 4 casos de error y muestra cómo los trata el consumidor |
+| `demo-dlq.sh --solo-purgar` | Deja las 6 colas en cero antes de presentar |
 
 #### 5.1 Resultados de la prueba local (2026-10-08, Docker Desktop 4.71)
 
