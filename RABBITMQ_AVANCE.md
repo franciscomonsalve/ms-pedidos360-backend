@@ -74,7 +74,7 @@ POST   /api/rabbit/messages        {"exchange":"cmd.direct","routingKey":"email.
 ```
 Los listados usan la API HTTP de gestión de RabbitMQ (puerto 15672); las altas/bajas usan AMQP.
 
-## 4. Hecho en la rama `feature/rabbitmq` (Fase B, EP4 — infraestructura, probada en local)
+## 4. Fase B (EP4) — infraestructura del clúster
 
 Todo en `infra/`. Levantado y verificado con Docker Desktop en local el 2026-10-08
 (resultados en la sección 5.1). Falta el tramo que exige JWT real (`orders` y `rabbit-admin`)
@@ -403,15 +403,14 @@ diagnóstico se puso `"EnableDockerAI": false` en `%APPDATA%\Docker\settings-sto
 `settings-store.json.bak-pedidos360` por si se quiere revertir).
 
 ### Cierre de EP3
-- Merge de `feature/rabbitmq` a `main` cuando esté probada; el compañero (EP3 es en parejas) debería revisarla.
+- ~~Merge de `feature/rabbitmq` a `main`~~ → **hecho**. El PR #2 fusionó hasta `4eb9fb0`; el resto
+  entró con un merge directo el 2026-10-16. Hoy `main` y `feature/rabbitmq` tienen el mismo contenido
+  y **los dos repos están al día en GitHub**.
 - Entrega: enlaces de los repos de GitHub en AVA + copia al correo del docente (backend y frontend).
-- Frontend: EP3 pide que esté completo y sin errores de compilación; no hay cambios de RabbitMQ en el
-  front (opcional: pantalla de administración de colas para Admin).
-
-### Deuda / buenas prácticas
-- `orders/application.yml` (perfil `cloud`) trae una contraseña de base de datos por defecto escrita en
-  el repo; conviene dejarla solo como variable de entorno.
-- Idempotencia de `notify` en memoria (se pierde al reiniciar); suficiente para el MVP.
+- Frontend: compila limpio en modo producción. Se le agregó el **control de cambio de estado** de un
+  pedido (antes `changeStatus()` existía en el servicio pero ningún componente la llamaba, así que el
+  front no tenía cómo disparar los comandos asíncronos). Sigue sin pantalla de administración de
+  colas, que es opcional.
 
 ## 6. Notas para retomar
 - Repos: `https://github.com/franciscomonsalve/ms-pedidos360-backend` y `.../frontend-pedidos360-`.
@@ -421,5 +420,9 @@ diagnóstico se puso `"EnableDockerAI": false` en `%APPDATA%\Docker\settings-sto
   **sin Elastic IP** → la IP cambia al parar/prender; el checklist de qué actualizar está en
   `Despliegue_AWS_Pedidos360_EP2.md` sección 2. IP al 2026-10-16: **`100.48.99.104`**
   (anteriores: `98.88.19.87`, `54.163.21.47` — cambia en cada arranque del Learner Lab). Privada: `172.31.31.31`.
+- **Documentos fuera de git**: `Guion_Presentacion_EP4.md`, `Guion_Presentacion_EP2.md` y
+  `Despliegue_AWS_Pedidos360_EP2.md` viven en `C:\Users\Gene\Desktop\PEDIDOS360` y **no están en
+  ningun repositorio** (la carpeta contiene `labsuser.pem` y los PDF de las evaluaciones, asi que no
+  conviene un `git init` ahi). No tienen respaldo: conviene copiarlos a la nube.
 - Preferencia del usuario: commits **sin** línea de coautoría de IA.
 - La terminal del usuario es PowerShell 5.1: no acepta `&&`.
