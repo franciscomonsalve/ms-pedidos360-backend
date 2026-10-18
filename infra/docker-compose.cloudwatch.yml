@@ -1,0 +1,106 @@
+# Superposicion opcional: envia los logs de todos los contenedores a CloudWatch Logs.
+#
+# POR QUE UN ARCHIVO APARTE Y NO DENTRO DEL COMPOSE PRINCIPAL
+# El driver de logging se resuelve al CREAR el contenedor: si las credenciales no
+# estan disponibles, el contenedor NO ARRANCA (no es que pierda los logs, es que
+# falla). Dejarlo opcional significa que el stack de siempre sigue arrancando con
+# `docker compose up -d` aunque CloudWatch no este configurado.
+#
+#   Normal (logs locales, docker logs):
+#     docker compose up -d
+#
+#   Con CloudWatch:
+#     docker compose -f docker-compose.yml -f docker-compose.cloudwatch.yml up -d
+#
+# REQUISITO PREVIO: la instancia EC2 necesita un perfil de IAM con permisos
+# logs:CreateLogGroup, logs:CreateLogStream y logs:PutLogEvents. En AWS Academy
+# basta asignarle `LabInstanceProfile` (EC2 -> la instancia -> Acciones ->
+# Seguridad -> Modificar rol de IAM). No requiere reiniciar la instancia, pero si
+# recrear los contenedores.
+#
+# Luego, en la consola: CloudWatch -> Grupos de registro -> /pedidos360/compose
+# Cada servicio es un flujo de registro (log stream) con su nombre.
+
+services:
+  rabbit1:
+    logging: &cw
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: ${LOG_GROUP:-/pedidos360/compose}
+        awslogs-create-group: "true"
+        awslogs-stream: rabbit1
+
+  rabbit2:
+    logging:
+      <<: *cw
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: ${LOG_GROUP:-/pedidos360/compose}
+        awslogs-create-group: "true"
+        awslogs-stream: rabbit2
+
+  rabbit-init:
+    logging:
+      <<: *cw
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: ${LOG_GROUP:-/pedidos360/compose}
+        awslogs-create-group: "true"
+        awslogs-stream: rabbit-init
+
+  orders:
+    logging:
+      <<: *cw
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: ${LOG_GROUP:-/pedidos360/compose}
+        awslogs-create-group: "true"
+        awslogs-stream: orders
+
+  # El servicio clave para la demo: aqui se ven los 3 consumidores procesando
+  # y los envios a la DLQ con su motivo.
+  notify:
+    logging:
+      <<: *cw
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: ${LOG_GROUP:-/pedidos360/compose}
+        awslogs-create-group: "true"
+        awslogs-stream: notify
+
+  rabbit-admin:
+    logging:
+      <<: *cw
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: ${LOG_GROUP:-/pedidos360/compose}
+        awslogs-create-group: "true"
+        awslogs-stream: rabbit-admin
+
+  audit:
+    logging:
+      <<: *cw
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: ${LOG_GROUP:-/pedidos360/compose}
+        awslogs-create-group: "true"
+        awslogs-stream: audit
+
+  bff:
+    logging:
+      <<: *cw
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: ${LOG_GROUP:-/pedidos360/compose}
+        awslogs-create-group: "true"
+        awslogs-stream: bff
+
+  frontend:
+    logging:
+      <<: *cw
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: ${LOG_GROUP:-/pedidos360/compose}
+        awslogs-create-group: "true"
+        awslogs-stream: frontend
