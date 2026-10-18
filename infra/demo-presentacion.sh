@@ -13,6 +13,7 @@
 #    bash infra/demo-presentacion.sh                     # actos 1 a 3, con pausas
 #    bash infra/demo-presentacion.sh --con-caida-de-nodo # agrega el acto 4
 #    bash infra/demo-presentacion.sh --sin-pausas        # de corrido, para ensayar
+#    bash infra/demo-presentacion.sh --falla-ahora       # UNA falla y su log, en 10 s
 #
 #  Se corre DESDE EL HOST del EC2 (el contenedor de rabbitmq no trae curl).
 #  Requiere PEDIDOS360_SIMULATE_FAILURES=true en notify (ya viene en el compose).
@@ -31,10 +32,12 @@ NOTIFY=${NOTIFY:-pedidos360-notify}
 
 PAUSAS=1
 NODO=0
+SOLO_FALLA=0
 for arg in "$@"; do
   case "$arg" in
     --sin-pausas)         PAUSAS=0 ;;
     --con-caida-de-nodo)  NODO=1 ;;
+    --falla-ahora)        SOLO_FALLA=1 ;;
     *) echo "Opcion desconocida: $arg"; exit 1 ;;
   esac
 done
@@ -157,6 +160,36 @@ EOF
 cat > falla-poison.json <<'EOF'
 {"type":"email.send","eventId":"demo-poison","timestamp":"2026-01-01T00:00:00Z","correlationId":"demo-falla","payload":{"orderId":2003,"customerId":"cliente-demo","status":"ACEPTADO","failMode":"poison"}}
 EOF
+
+# =============================================================================
+# Atajo para la presentacion: "muestreme una falla AHORA".
+# Publica un mensaje que no se puede procesar y muestra la linea del log y el
+# contador de la cola muerta. Sin pausas, sin tocar nada mas.
+if [ "$SOLO_FALLA" = "1" ]; then
+  acto "UNA FALLA, AHORA"
+
+  # eventId unico: con uno repetido el consumidor lo descartaria por idempotencia.
+  SELLO=$(date +%s)
+  sed "s/demo-poison/falla-$SELLO/" falla-poison.json > ahora.json
+
+  paso "Antes: cuantos mensajes hay en la cola muerta"
+  nota "q.cmd.email.dlq = $(docker exec "$RABBIT1" rabbitmqctl -q list_queues name messages 2>/dev/null | awk '$1=="q.cmd.email.dlq" {print $2}')"
+
+  paso "Publicando un mensaje que el consumidor NO puede procesar"
+  publicar cmd.topic cmd.email.aceptado ahora.json "failMode=poison (eventId falla-$SELLO)"
+
+  sleep 6
+  paso "Lo que decidio el consumidor, y por que"
+  logs "dlq|reintent" 30s
+
+  paso "Despues: la cola muerta subio en uno"
+  nota "q.cmd.email.dlq = $(docker exec "$RABBIT1" rabbitmqctl -q list_queues name messages 2>/dev/null | awk '$1=="q.cmd.email.dlq" {print $2}')"
+  echo
+  nota "El mensaje no se perdio ni se reintenta para siempre: quedo en la cola"
+  nota "muerta, con el motivo registrado en el log y disponible para inspeccion."
+  echo
+  exit 0
+fi
 
 # =============================================================================
 acto "ACTO 0  -  Punto de partida limpio"
