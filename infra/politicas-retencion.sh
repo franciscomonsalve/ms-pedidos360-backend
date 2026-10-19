@@ -26,10 +26,17 @@ set -u
 
 RABBIT1=${RABBIT1:-pedidos360-rabbit1}
 
-# Prioridades: la politica de retencion (2) gana sobre ha-all (1) donde se
-# solapan, y la de demo (3) gana sobre ambas mientras este puesta.
+# Prioridades: la politica de retencion (2) gana sobre ha-all (1), y la de demo
+# (3) gana sobre ambas mientras este puesta.
 PRIO_RETENCION=2
 PRIO_DEMO=3
+
+# ATENCION - RabbitMQ aplica UNA SOLA politica por cola: gana la de mayor
+# prioridad y las definiciones NO SE COMBINAN. Por eso cada definicion de abajo
+# repite ha-mode/ha-sync-mode: si no lo hiciera, desplazaria a la politica
+# ha-all y las 6 colas se quedarian SIN REPLICA, que es justo lo que el
+# elemento 8 de EP4 exige demostrar.
+HA='"ha-mode":"all","ha-sync-mode":"automatic"'
 
 titulo() { echo; echo "=== $* ==="; }
 nota()   { echo "    $*"; }
@@ -70,7 +77,7 @@ case "${1:-}" in
     nota "la DLQ por 'expire', que es el segundo de los tres motivos de muerte."
     echo
     rmqctl set_policy demo-ttl '^q\.cmd\.email$' \
-      '{"message-ttl":15000,"dead-letter-exchange":"cmd.dead.dlx","dead-letter-routing-key":"email.send"}' \
+      "{\"message-ttl\":15000,\"dead-letter-exchange\":\"cmd.dead.dlx\",\"dead-letter-routing-key\":\"email.send\",$HA}" \
       --priority "$PRIO_DEMO" --apply-to queues
     echo
     nota "Ahora, para mostrarlo:"
@@ -101,7 +108,7 @@ nota "Es el valor de la guía. Los mensajes fallidos se conservan un día para"
 nota "análisis y después el broker los descarta solo, sin intervención."
 echo
 rmqctl set_policy retencion-dlq '^q\.cmd\..*\.dlq$' \
-  '{"message-ttl":86400000,"max-length":1000}' \
+  "{\"message-ttl\":86400000,\"max-length\":1000,$HA}" \
   --priority "$PRIO_RETENCION" --apply-to queues
 
 # -----------------------------------------------------------------------------
@@ -115,7 +122,7 @@ nota "max-length=1000 habilita el tercer motivo de muerte ('maxlen'): si la cola
 nota "se llena, el mensaje más antiguo se va a la DLQ en vez de perderse."
 echo
 rmqctl set_policy retencion-principales '^q\.cmd\.(email|kitchen|invoice)$' \
-  '{"message-ttl":600000,"max-length":1000,"overflow":"reject-publish-dlx"}' \
+  "{\"message-ttl\":600000,\"max-length\":1000,\"overflow\":\"reject-publish-dlx\",$HA}" \
   --priority "$PRIO_RETENCION" --apply-to queues
 
 # -----------------------------------------------------------------------------
