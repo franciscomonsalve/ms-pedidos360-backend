@@ -11,6 +11,8 @@ Asignatura DSY1107 (Desarrollo Cloud Native I), Duoc UC.
 | [RABBITMQ_AVANCE.md](RABBITMQ_AVANCE.md) | Diseño de la mensajería, decisiones, hallazgos y estado |
 | [PRUEBAS_REALIZADAS.md](PRUEBAS_REALIZADAS.md) | Evidencia de las pruebas ejecutadas |
 | [ms-pedidos360-bff/REGISTRO_USUARIOS.md](ms-pedidos360-bff/REGISTRO_USUARIOS.md) | Alta de usuarios en Entra ID |
+| [infra/TOPOLOGIA.md](infra/TOPOLOGIA.md) | La topología de mensajería en detalle |
+| [infra/DONDE_MIRAR.md](infra/DONDE_MIRAR.md) | Qué pantalla mirar en RabbitMQ y en CloudWatch, y qué debería verse |
 
 ---
 
@@ -139,6 +141,87 @@ docker logs -f pedidos360-notify
 
 ---
 
+## Políticas de retención: TTL y longitud máxima
+
+```bash
+bash infra/politicas-retencion.sh          # aplica: DLQ 24 h, principales 10 min, máx. 1000
+bash infra/politicas-retencion.sh --ver    # qué política aplica a cada cola
+bash infra/politicas-retencion.sh --quitar # vuelve atrás (no toca ha-all)
+```
+
+| Colas | TTL | max-length | Overflow |
+|---|---|---|---|
+| `q.cmd.email` · `kitchen` · `invoice` | 10 min | 1000 | `reject-publish-dlx` |
+| las tres `.dlq` | 24 h | 1000 | — |
+
+**Se aplican por política, no como argumentos de la cola.** Los argumentos de una cola son
+inmutables: cambiar el TTL obliga a borrar y recrear la cola, o el arranque falla con
+`PRECONDITION_FAILED`. Una política hace lo mismo sobre colas ya creadas, se cambia en caliente
+y se quita con un comando.
+
+> **RabbitMQ aplica una sola política por cola:** gana la de mayor prioridad y las definiciones
+> **no se combinan**. Las políticas de retención están en prioridad 2 y `ha-all` en 1, así que
+> desplazarían la replicación. Por eso cada definición de retención **repite** `ha-mode` y
+> `ha-sync-mode`. Sin eso, las 6 colas quedan sin réplica aunque todo parezca funcionar.
+
+Con esto quedan cubiertos los tres motivos por los que un mensaje llega a la DLQ:
+
+| `reason` en `x-death` | Causa | Dónde se configura |
+|---|---|---|
+| `rejected` | el consumidor hace `basicReject` | código, `CommandProcessor` |
+| `expired` | se venció el TTL | política |
+| `maxlen` | la cola alcanzó su límite | política, con `overflow: reject-publish-dlx` |
+
+Para ver la expiración en vivo: `--demo-ttl` baja el TTL de `q.cmd.email` a 15 s. **Hay que
+quitarla después**, o rompe la demostración de la caída del consumidor.
+
+---
+
+## Monitoreo con CloudWatch
+
+Opcional y desacoplado: un overlay de Compose que cambia el driver de logs de los 9 servicios.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.cloudwatch.yml up -d
+bash infra/cloudwatch-verificar.sh
+```
+
+Los registros van al grupo `/pedidos360/compose`, con un flujo por servicio. Requiere que la
+instancia tenga un perfil de IAM con permiso sobre CloudWatch Logs (en AWS Academy,
+`LabInstanceProfile`).
+
+**Es un archivo aparte a propósito:** si el driver `awslogs` falla, el contenedor **no arranca**.
+Manteniéndolo opcional, el stack normal nunca depende de que AWS responda.
+
+Consulta útil en Logs Insights, para encontrar una falla sin saber en qué servicio ocurrió:
+
+```
+fields @timestamp, @logStream, @message
+| filter @message like /DLQ/
+| sort @timestamp desc
+```
+
+> `docker logs` sigue funcionando igual, porque Docker mantiene una caché local además de
+> enviar. Para una demostración en vivo conviene `docker logs`, que es instantáneo; CloudWatch
+> tarda unos segundos en indexar.
+
+---
+
+## Demostración guiada
+
+```bash
+bash infra/demo-presentacion.sh                      # 4 actos, con pausas
+bash infra/demo-presentacion.sh --con-caida-de-nodo  # incluye tumbar un nodo del clúster
+bash infra/demo-presentacion.sh --falla-ahora        # publica un solo mensaje envenenado
+```
+
+Los cuatro actos: camino feliz · se cae el consumidor · falla el mensaje · se cae un nodo.
+
+`--falla-ahora` sella el `eventId` con la hora, porque si se repitiera, la idempotencia lo
+descartaría en silencio y no se vería nada en los registros.
+
+---
+
 ## Levantar el stack completo
 
 Requiere configuración que **no está en el repositorio**.
@@ -228,13 +311,20 @@ detalle por campo, el prefijo `amq.` está reservado, duplicado devuelve **409**
 
 ```
 infra/
-  docker-compose.yml        Stack completo: 5 microservicios + nginx + 2 nodos RabbitMQ
-  .env.example              Plantilla de configuración (copiar a .env, que no se versiona)
-  rabbitmq/rabbitmq.conf    Config compartida por los dos nodos (peer discovery, límites)
-  rabbitmq/ha-policy.json   Política de réplica de las colas
-  verificar-cluster.sh      Chequeos del clúster
-  demo-dlq.sh               Demo de los caminos de error a DLQ
-ms-pedidos360-*/            Un módulo Maven por microservicio
+  docker-compose.yml            Stack completo: 5 microservicios + nginx + 2 nodos RabbitMQ
+  docker-compose.cloudwatch.yml Overlay opcional: envía los logs a CloudWatch
+  .env.example                  Plantilla de configuración (copiar a .env, que no se versiona)
+  rabbitmq/rabbitmq.conf        Config compartida por los dos nodos (peer discovery, límites)
+  rabbitmq/ha-policy.json       Política de réplica de las colas
+  verificar-cluster.sh          Chequeos del clúster
+  demo-dlq.sh                   Demo de los caminos de error a DLQ
+  demo-presentacion.sh          Demostración en 4 actos, con pausas
+  politicas-retencion.sh        Aplica/quita TTL y longitud máxima por política
+  cloudwatch-verificar.sh       Comprueba que los logs llegan a CloudWatch
+  TOPOLOGIA.md                  La topología de mensajería en detalle
+  DONDE_MIRAR.md                Qué pantalla mirar y qué debería verse
+ms-pedidos360-*/                Un módulo Maven por microservicio
 ```
 
-El frontend está en un repositorio aparte.
+El frontend está en un repositorio aparte, con su propio
+[README](../frontend-pedidos360/README.md).
