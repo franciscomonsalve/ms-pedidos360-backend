@@ -101,3 +101,23 @@ spring:
       ddl-auto: update
     show-sql: true
 
+
+---
+# Perfil 'local': desarrollo y demostracion en la maquina, sin Docker ni Azure.
+# Se activa con -Dspring-boot.run.profiles=dev,local
+#
+# Apaga la llamada a catalog por la MISMA razon que el compose la apaga con
+# CATALOG_ENABLED=false: catalog no esta levantado y orders lo llamaria sin
+# token, asi que toda transicion a ACEPTADO fallaria con 409 y el pedido se
+# quedaria bloqueado en CREADO. Sin esto, la demostracion del flujo de eventos
+# no arranca.
+#
+# La cadena de seguridad permisiva de este perfil esta en SecurityConfig.
+spring:
+  config:
+    activate:
+      on-profile: local
+
+pedidos360:
+  catalog:
+    enabled: false

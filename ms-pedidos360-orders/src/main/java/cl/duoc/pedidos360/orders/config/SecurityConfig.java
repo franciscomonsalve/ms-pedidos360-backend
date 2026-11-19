@@ -41,7 +41,29 @@ public class SecurityConfig {
         return converter;
     }
 
+    /**
+     * Cadena SOLO para desarrollo local, activa con el perfil {@code local}.
+     *
+     * Permite ejercitar el flujo de eventos (crear un pedido, cambiar su estado
+     * y ver el evento viajar por Kafka) sin levantar el frontend, el BFF y el
+     * proveedor de identidad solo para conseguir un JWT.
+     *
+     * NO SE ACTIVA NUNCA EN DESPLIEGUE: hay que pedirlo explicitamente con
+     * SPRING_PROFILES_ACTIVE=local. Sin ese perfil manda la cadena de abajo,
+     * que exige los roles de siempre.
+     */
     @Bean
+    @org.springframework.context.annotation.Profile("local")
+    public SecurityFilterChain filterChainLocal(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        return http.build();
+    }
+
+    @Bean
+    @org.springframework.context.annotation.Profile("!local")
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
