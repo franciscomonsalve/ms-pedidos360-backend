@@ -15,14 +15,16 @@ spring:
           audiences: ${AZURE_API_CLIENT_ID:08c770a5-21a6-4434-8d59-28723c7c759d}
 
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    consumer:
-      group-id: pedidos360-audit
-      auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      properties:
-        spring.json.trusted.packages: "*"
+    # Los tres brokers. Basta con que uno responda para descubrir el resto del
+    # cluster, pero se listan los tres: si el primero esta caido al arrancar,
+    # el cliente prueba con el siguiente.
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9093,localhost:9094}
+    # El resto de la configuracion del consumidor (deserializadores seguros,
+    # reintentos, DLT y concurrencia por particion) esta en KafkaConsumerConfig,
+    # porque hacen falta dos fabricas distintas: una por cada tipo de evento.
+    # Los group-id se declaran en cada @KafkaListener:
+    #   pedidos360-audit     -> orders.events
+    #   pedidos360-timeline  -> audit.timeline
 
 pedidos360:
   messaging:

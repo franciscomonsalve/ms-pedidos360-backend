@@ -18,11 +18,22 @@ spring:
         default-requeue-rejected: false
         missing-queues-fatal: false
 
+  # Kafka: este servicio ademas VIGILA el flujo de eventos de pedidos con el
+  # grupo pedidos360-notify-stream. Es un uso distinto del de RabbitMQ: alli
+  # recibe comandos dirigidos a el, aqui observa hechos que publica otro.
+  # La configuracion del consumidor esta en KafkaStreamConfig.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9093,localhost:9094}
+
 pedidos360:
   messaging:
     # Gancho de demostracion de fallas (payload.failMode = transient | poison).
     # Apagado por defecto; se activa por variable de entorno en la demo.
     simulate-failures: ${PEDIDOS360_SIMULATE_FAILURES:false}
+
+    # Kafka (eventos de dominio que este servicio vigila). Mismo nombre de
+    # topico que publica ms-pedidos360-orders.
+    topic-orders-events: orders.events
 
     # RabbitMQ: MISMOS nombres que ms-pedidos360-orders (unica fuente de verdad
     # por servicio; ni la topologia ni los @RabbitListener escriben nombres).
@@ -44,6 +55,11 @@ pedidos360:
           name: q.cmd.invoice
           routing-key: invoice.gen
           topic-prefix: cmd.invoice
+
+  # Umbral a partir del cual un pedido se marca para revision manual. Va fuera
+  # de 'messaging' porque es una regla de negocio, no configuracion de mensajeria.
+  alertas:
+    monto-alto: ${PEDIDOS360_MONTO_ALTO:100000}
 
 management:
   endpoints:
