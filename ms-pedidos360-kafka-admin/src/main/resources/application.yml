@@ -1,0 +1,27 @@
+server:
+  # Siguiente puerto libre despues de rabbit-admin (8086). Igual que aquel,
+  # este servicio NO publica puerto al exterior en el compose: solo se alcanza
+  # desde dentro de la red de Docker, a traves del BFF.
+  port: 8087
+
+spring:
+  application:
+    name: ms-pedidos360-kafka-admin
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://login.microsoftonline.com/${AZURE_TENANT_ID:f280f365-653c-4282-b1ee-200e91b01736}/v2.0
+          audiences: ${AZURE_API_CLIENT_ID:08c770a5-21a6-4434-8d59-28723c7c759d}
+
+  kafka:
+    # Los tres brokers: si el primero esta caido al arrancar, el AdminClient
+    # descubre el cluster por cualquiera de los otros.
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092,localhost:9093,localhost:9094}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

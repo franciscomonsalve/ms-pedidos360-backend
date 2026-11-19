@@ -18,6 +18,7 @@
         <module>ms-pedidos360-notify</module>
         <module>ms-pedidos360-audit</module>
         <module>ms-pedidos360-rabbit-admin</module>
+        <module>ms-pedidos360-kafka-admin</module>
     </modules>
 
     <properties>
