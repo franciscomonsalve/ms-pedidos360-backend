@@ -26,10 +26,23 @@ Asignatura DSY1107 (Desarrollo Cloud Native I), Duoc UC.
 | `ms-pedidos360-notify` | 8083 | **Consume** los comandos: correo, cocina y boleta |
 | `ms-pedidos360-audit` | 8084 | Registro de auditoría, solo lectura y solo Admin |
 | `ms-pedidos360-rabbit-admin` | 8086 | API REST para administrar colas, exchanges y bindings |
+| `ms-pedidos360-kafka-admin` | 8087 | API REST para administrar topicos, configuraciones y consumer groups |
 
-`notify` y `rabbit-admin` **no publican puerto** hacia fuera: son internos a la red de Docker.
+`notify`, `rabbit-admin` y `kafka-admin` **no publican puerto** hacia fuera: son internos a la red
+de Docker. Son servicios que pueden borrar colas y topicos; no deben estar expuestos.
 
 ### Mensajería
+
+El sistema usa **los dos** sistemas, y no por duplicación: resuelven problemas distintos.
+
+| | **RabbitMQ** | **Kafka** |
+|---|---|---|
+| Qué transporta | **comandos**: «envía este correo» | **eventos**: «el pedido 42 fue entregado» |
+| Destinatarios | uno, el responsable de ejecutarlo | N, y el emisor no sabe quiénes |
+| Al consumirse | el mensaje desaparece de la cola | el evento queda; cada grupo lleva su offset |
+| Añadir un consumidor | hay que repartir el trabajo | basta con un grupo nuevo, sin tocar al productor |
+
+#### RabbitMQ — comandos
 
 ```
 cmd.direct (direct) --kitchen.ticket--> q.cmd.kitchen --(rechazo)--> cmd.dead.dlx --> q.cmd.kitchen.dlq
@@ -47,6 +60,41 @@ Qué publica cada transición de estado:
 | Cualquier cambio de estado | email, por el exchange **topic**, clave `cmd.email.<estado>` |
 | → `ACEPTADO` | + ticket de cocina, por el **direct** |
 | → `ENTREGADO` | + boleta, por el **direct** |
+
+#### Kafka — eventos de dominio
+
+```
+orders ──▶ orders.events (3 particiones · 3 réplicas · delete, 7 días)
+                │
+      ┌─────────┴──────────┐
+ pedidos360-audit     pedidos360-notify-stream
+      │                    │
+   audit                notify
+   persiste             vigila y alerta
+      │
+   publica
+      ▼
+ audit.timeline (3 particiones · 3 réplicas · COMPACT, 30 días)
+      │
+ pedidos360-timeline ──▶ audit
+```
+
+**La clave del mensaje es el `orderId`** en los dos tópicos. Eso hace dos cosas: garantiza que
+todos los eventos de un mismo pedido caen en la misma partición y se procesan **en orden**, y
+permite que la compactación de `audit.timeline` funcione, porque trabaja por clave.
+
+**Dos políticas de limpieza distintas, por dos necesidades distintas:**
+
+| Tópico | `cleanup.policy` | Por qué |
+|---|---|---|
+| `orders.events` | `delete`, 7 días | flujo de **hechos**: eventos inmutables que caducan porque el histórico vive en la base |
+| `audit.timeline` | `compact`, 30 días | flujo de **estado**: interesa el último estado de cada pedido; Kafka conserva el último valor por clave |
+
+**Tres consumer groups**, cada uno con su offset. `audit` y `notify` leen el **mismo** tópico de
+forma independiente: si uno se cae, el otro no se entera, y al volver retoma desde donde iba.
+
+Los mensajes que agotan reintentos van a `<tópico>.DLT`, el equivalente Kafka de las DLQ de
+RabbitMQ. El patrón es el mismo en los dos sistemas: cambia el mecanismo, no el criterio.
 
 ---
 
@@ -88,11 +136,69 @@ Ajusta `jdkHome` a tu instalación (por ejemplo `C:\Program Files\Amazon Corrett
 mvn clean package
 ```
 
-Debe terminar en `BUILD SUCCESS` con **43 pruebas** en verde. El desglose por clase está en
+Debe terminar en `BUILD SUCCESS` con **88 pruebas** en verde. El desglose por clase está en
 [PRUEBAS_REALIZADAS.md](PRUEBAS_REALIZADAS.md).
 
 > Durante las pruebas de `notify` verás líneas `ERROR ... mensaje enviado a DLQ`. **Son esperadas**:
 > es el test ejercitando los caminos de error a propósito.
+
+---
+
+## Levantar Kafka en local
+
+Tres nodos Zookeeper, tres brokers y Kafka UI. **No necesita ningún secreto.**
+
+```bash
+cd infra
+docker compose -f docker-compose.kafka.yml up -d     # solo Kafka
+bash kafka-topics.sh                                  # crea los 4 tópicos
+```
+
+Desde cero, con volúmenes nuevos, tarda unos **25 segundos**: el quórum de Zookeeper debe formarse
+antes de que los brokers puedan registrarse, y los healthchecks encadenan ese orden.
+
+- **Kafka UI: http://localhost:8090**
+
+Para levantarlo junto al resto del stack, se combinan los dos archivos:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.kafka.yml up -d
+```
+
+> **La imagen está fijada en `7.5.3` a propósito.** Kafka 4.x eliminó Zookeeper por completo; con
+> `latest` no se puede montar la arquitectura de tres nodos ZK que exige el proyecto.
+
+### Verificar
+
+```bash
+bash infra/kafka-topics.sh --ver   # tópicos, particiones, réplicas y configuración
+bash infra/kafka-topics.sh --lag   # offsets y LAG de cada consumer group
+```
+
+### Demostrar que los consumer groups son independientes
+
+```bash
+docker stop pedidos360-notify            # cae un grupo consumidor
+# cambiar estados de pedidos desde la app
+bash infra/kafka-topics.sh --lag         # notify-stream acumula lag; audit sigue en 0
+docker start pedidos360-notify
+bash infra/kafka-topics.sh --lag         # vuelve a 0 sin perder nada
+```
+
+### Ejercitar el flujo sin Docker ni Azure
+
+El perfil `local` permite probar el recorrido completo de un evento sin levantar frontend, BFF ni
+proveedor de identidad solo para conseguir un JWT. **Nunca se activa solo:** hay que pedirlo.
+
+```bash
+mvn -pl ms-pedidos360-orders spring-boot:run -Dspring-boot.run.profiles=dev,local
+mvn -pl ms-pedidos360-audit  spring-boot:run
+mvn -pl ms-pedidos360-notify spring-boot:run
+mvn -pl ms-pedidos360-kafka-admin spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+Ese perfil además apaga la llamada a `catalog`, por la misma razón que el compose la apaga con
+`CATALOG_ENABLED=false`: sin eso, toda transición a `ACEPTADO` falla con 409.
 
 ---
 
@@ -307,11 +413,48 @@ detalle por campo, el prefijo `amq.` está reservado, duplicado devuelve **409**
 
 ---
 
+## API del administrador de Kafka
+
+Vía BFF, solo rol Admin. Base: `/api/kafka`
+
+```
+POST   /topics                      {"name":"demo","partitions":3,"replicationFactor":3,
+                                     "configs":{"retention.ms":"600000","cleanup.policy":"delete"}}
+GET    /topics          ·  GET /topics/{nombre}   ·  DELETE /topics/{nombre}
+PATCH  /topics/{nombre}/configs     {"configs":{"retention.ms":"600000"}}
+PATCH  /topics/{nombre}/partitions?total=6
+GET    /groups          ·  GET /groups/{id}       ·  DELETE /groups/{id}
+GET    /cluster
+```
+
+`GET /topics/{nombre}` devuelve las particiones con su **líder** y sus **réplicas en sincronía**
+(ISR), más la configuración que se apartó del valor por defecto — que es la que alguien decidió
+a propósito y la que interesa auditar.
+
+`GET /groups/{id}` calcula el **LAG por partición** cruzando el offset del grupo con el final del
+log. Es la métrica operacional más importante de Kafka: si crece de forma sostenida, el consumidor
+no da abasto o está caído.
+
+**Qué se puede cambiar y qué no**, que es la parte que sorprende:
+
+| | |
+|---|---|
+| Particiones | se pueden **aumentar**, nunca reducir — y aumentarlas cambia el reparto por hash, así que se pierde el orden respecto de los mensajes históricos |
+| Factor de replicación | no se cambia por aquí: requiere reasignar réplicas entre brokers |
+| Configuraciones | sí, **en caliente**: `retention.ms`, `cleanup.policy`, `min.insync.replicas`… |
+
+Códigos: **400** validación o reducir particiones, **404** inexistente, **409** duplicado,
+**502** Kafka no responde (y no 500: el fallo es de una dependencia, no del servicio).
+
+---
+
 ## Estructura
 
 ```
 infra/
   docker-compose.yml            Stack completo: 5 microservicios + nginx + 2 nodos RabbitMQ
+  docker-compose.kafka.yml      3 Zookeeper + 3 brokers Kafka + Kafka UI
+  kafka-topics.sh               Crea los topicos y consulta particiones, configs y LAG
   docker-compose.cloudwatch.yml Overlay opcional: envía los logs a CloudWatch
   .env.example                  Plantilla de configuración (copiar a .env, que no se versiona)
   rabbitmq/rabbitmq.conf        Config compartida por los dos nodos (peer discovery, límites)
