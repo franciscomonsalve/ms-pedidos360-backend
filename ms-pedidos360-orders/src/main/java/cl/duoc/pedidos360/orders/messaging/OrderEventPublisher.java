@@ -2,65 +2,69 @@ package cl.duoc.pedidos360.orders.messaging;
 
 import cl.duoc.pedidos360.orders.entity.Order;
 import cl.duoc.pedidos360.orders.entity.OrderStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
-
 /**
- * Publica los eventos de negocio del pedido en el topico Kafka "orders.events",
- * fuente de verdad consumida por ms-pedidos360-report (KPIs) y ms-pedidos360-audit
- * (timeline de auditoria).
+ * Publica los eventos de dominio del pedido en el topico Kafka
+ * {@code orders.events}, fuente de verdad para los consumidores de auditoria y
+ * de notificaciones.
+ *
+ * LA CLAVE DEL MENSAJE ES EL orderId, Y ESO NO ES UN DETALLE
+ * Kafka asigna particion por hash de la clave. Al usar el orderId:
+ *   - todos los eventos de un mismo pedido caen en la MISMA particion, y Kafka
+ *     garantiza el orden dentro de una particion. Un consumidor nunca vera
+ *     "Entregado" antes que "Aceptado" para el mismo pedido.
+ *   - pedidos distintos se reparten entre las 3 particiones, asi que tres
+ *     consumidores del mismo grupo pueden trabajar en paralelo.
+ * Sin clave, Kafka reparte round-robin y se pierde la garantia de orden.
+ *
+ * POR QUE EL FALLO NO TUMBA LA OPERACION
+ * El envio es asincrono y el error se registra, no se propaga: si Kafka no
+ * esta disponible, el pedido YA se guardo en la base y la respuesta HTTP ya
+ * salio. Publicar el evento es una consecuencia del cambio de estado, no un
+ * requisito para que ocurra.
  */
 @Component
 public class OrderEventPublisher {
 
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(OrderEventPublisher.class);
+    private static final Logger log = LoggerFactory.getLogger(OrderEventPublisher.class);
 
-    private final KafkaTemplate<String, MessageEnvelope> kafkaTemplate;
+    private final KafkaTemplate<String, OrderEvent> kafkaTemplate;
 
     @Value("${pedidos360.messaging.topic-orders-events}")
     private String ordersEventsTopic;
 
-    public OrderEventPublisher(KafkaTemplate<String, MessageEnvelope> kafkaTemplate) {
+    public OrderEventPublisher(KafkaTemplate<String, OrderEvent> kafkaTemplate) {
         this.kafkaTemplate = kafkaTemplate;
     }
 
     public void publish(Order order, OrderStatus previousStatus) {
-        String eventType = mapEventType(order.getStatus());
-        MessageEnvelope envelope = MessageEnvelope.of(
-                eventType,
-                String.valueOf(order.getId()),
-                Map.of(
-                        "orderId", order.getId(),
-                        "customerId", order.getCustomerId(),
-                        "previousStatus", previousStatus != null ? previousStatus.name() : "NONE",
-                        "status", order.getStatus().name(),
-                        "totalAmount", order.getTotalAmount()
-                ));
-        try {
-            kafkaTemplate.send(ordersEventsTopic, String.valueOf(order.getId()), envelope)
-                .whenComplete((result, ex) -> {
-                    if (ex != null) {
-                        log.warn("No se pudo publicar el evento '{}' del pedido {} en Kafka: {}",
-                                eventType, order.getId(), ex.getMessage());
-                    }
-                });
-        } catch (Exception ex) {
-            log.warn("Kafka no disponible; se omite la publicación del evento '{}' del pedido {}: {}",
-                    eventType, order.getId(), ex.getMessage());
-        }
-    }
+        OrderEvent event = OrderEvent.from(order, previousStatus);
+        String key = String.valueOf(order.getId());
 
-    private String mapEventType(OrderStatus status) {
-        return switch (status) {
-            case CREADO -> "OrderCreated";
-            case ACEPTADO -> "OrderAccepted";
-            case EN_PREPARACION -> "OrderPreparing";
-            case DESPACHADO -> "OrderDispatched";
-            case ENTREGADO -> "OrderDelivered";
-            case CANCELADO -> "OrderCancelled";
-        };
+        try {
+            kafkaTemplate.send(ordersEventsTopic, key, event)
+                    .whenComplete((result, ex) -> {
+                        if (ex != null) {
+                            log.error("No se pudo publicar {} del pedido {} en {}: {}",
+                                    event.eventType(), event.orderId(), ordersEventsTopic,
+                                    ex.getMessage());
+                            return;
+                        }
+                        var meta = result.getRecordMetadata();
+                        log.info("Evento publicado tipo={} eventId={} traceId={} topic={} particion={} offset={}",
+                                event.eventType(), event.eventId(), event.traceId(),
+                                meta.topic(), meta.partition(), meta.offset());
+                    });
+        } catch (Exception ex) {
+            // Solo llega aqui si el productor no pudo ni encolar el envio
+            // (por ejemplo, agotado max.block.ms sin metadatos del cluster).
+            log.error("Kafka no disponible; se omite el evento {} del pedido {}: {}",
+                    event.eventType(), event.orderId(), ex.getMessage());
+        }
     }
 }
