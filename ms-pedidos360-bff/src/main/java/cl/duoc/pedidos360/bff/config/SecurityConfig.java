@@ -126,7 +126,13 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim).toList());
-        config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        // Superficie minima: solo los metodos que el frontend realmente usa.
+        // El navegador consulta GET, POST y PATCH; OPTIONS es el preflight mismo.
+        // Los endpoints DELETE del catalogo y de los administradores (rabbit-admin,
+        // kafka-admin) se operan desde Postman, que no aplica CORS, asi que no
+        // necesitan declararse aqui. Declarar un metodo que ningun cliente de
+        // navegador invoca solo amplia la superficie anunciada sin habilitar nada.
+        config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(false);
 
