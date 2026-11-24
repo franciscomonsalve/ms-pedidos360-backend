@@ -107,6 +107,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/report/**").hasRole("ADMIN")
                 .requestMatchers("/api/audit/**").hasRole("ADMIN")
                 .requestMatchers("/api/rabbit/**").hasRole("ADMIN")
+                .requestMatchers("/api/kafka/**").hasRole("ADMIN")
                 .requestMatchers("/api/orders/**").hasAnyRole("ADMIN", "OPERATOR", "CUSTOMER")
                 .anyRequest().authenticated()
             )

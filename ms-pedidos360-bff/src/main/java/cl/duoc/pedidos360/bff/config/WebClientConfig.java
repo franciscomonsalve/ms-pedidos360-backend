@@ -23,6 +23,9 @@ public class WebClientConfig {
     @Value("${pedidos360.downstream.rabbit-admin-url}")
     private String rabbitAdminUrl;
 
+    @Value("${pedidos360.downstream.kafka-admin-url}")
+    private String kafkaAdminUrl;
+
     @Value("${pedidos360.graph.base-url:https://graph.microsoft.com}")
     private String graphBaseUrl;
 
@@ -52,6 +55,11 @@ public class WebClientConfig {
     @Bean
     public WebClient rabbitAdminWebClient(WebClient.Builder builder) {
         return builder.baseUrl(rabbitAdminUrl).build();
+    }
+
+    @Bean
+    public WebClient kafkaAdminWebClient(WebClient.Builder builder) {
+        return builder.baseUrl(kafkaAdminUrl).build();
     }
 
     /** Microsoft Graph: alta de usuarios y asignacion de App Roles en Entra ID. */

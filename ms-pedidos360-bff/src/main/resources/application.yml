@@ -43,6 +43,7 @@ pedidos360:
     audit-url: ${AUDIT_SERVICE_URL:http://localhost:8084}
     report-url: ${REPORT_SERVICE_URL:http://localhost:8085}
     rabbit-admin-url: ${RABBIT_ADMIN_SERVICE_URL:http://localhost:8086}
+    kafka-admin-url: ${KAFKA_ADMIN_SERVICE_URL:http://localhost:8087}
 
 management:
   endpoints:

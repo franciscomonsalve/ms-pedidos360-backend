@@ -2,7 +2,7 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
 
-# El pom raiz declara los 5 modulos; Maven exige que TODOS existan para armar el
+# El pom raiz declara los 7 modulos; Maven exige que TODOS existan para armar el
 # reactor, aunque -pl solo construya uno. Por eso se copian todos los pom.xml
 # (livianos y estables: mejoran el cache de capas) y solo el codigo de audit.
 COPY pom.xml .
@@ -12,6 +12,7 @@ COPY ms-pedidos360-catalog/pom.xml ms-pedidos360-catalog/pom.xml
 COPY ms-pedidos360-notify/pom.xml ms-pedidos360-notify/pom.xml
 COPY ms-pedidos360-audit/pom.xml ms-pedidos360-audit/pom.xml
 COPY ms-pedidos360-rabbit-admin/pom.xml ms-pedidos360-rabbit-admin/pom.xml
+COPY ms-pedidos360-kafka-admin/pom.xml ms-pedidos360-kafka-admin/pom.xml
 
 # El pom raiz exige un toolchain JDK 21 (maven-toolchains-plugin). Se declara
 # apuntando al JDK de la propia imagen, que ya es 21.

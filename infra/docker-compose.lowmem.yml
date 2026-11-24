@@ -1,0 +1,91 @@
+# =============================================================================
+#  Overlay de memoria ajustada, para instancias de 4 GB (t3.medium).
+#
+#  POR QUE EXISTE
+#  El stack completo -3 Zookeeper, 3 brokers Kafka, Kafka UI, 2 nodos RabbitMQ,
+#  6 JVM de microservicios y nginx- pide unos 6,4 GB de RSS con los valores por
+#  defecto. En una maquina de 4 GB no cabe.
+#
+#  Este archivo NO toca la topologia: solo recorta los heaps. El compose
+#  original conserva sus valores normales, que son los correctos para una
+#  maquina holgada. El ajuste de memoria es una decision de DESPLIEGUE, no de
+#  diseno, y por eso vive aparte.
+#
+#  COMO SE USA
+#    En una maquina con 8 GB o mas (no hace falta este archivo):
+#      docker compose -f docker-compose.yml -f docker-compose.kafka.yml up -d
+#
+#    En t3.medium (4 GB):
+#      docker compose -f docker-compose.yml \
+#                     -f docker-compose.kafka.yml \
+#                     -f docker-compose.lowmem.yml up -d
+#
+#  ANTES DE USARLO, AGREGAR SWAP. Los recortes bajan el consumo a ~4,5 GB, que
+#  sigue por encima de los 4 GB fisicos: el swap absorbe el pico de arranque,
+#  cuando todas las JVM reservan su heap a la vez. En reposo el consumo real es
+#  bastante menor.
+#
+#      sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile
+#      sudo mkswap /swapfile && sudo swapon /swapfile
+#      echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+#
+#  QUE ESPERAR: el arranque tarda mas -los brokers de Kafka pueden necesitar
+#  dos o tres minutos en lugar de 25 segundos- pero una vez levantado el
+#  sistema responde con normalidad. El volumen de mensajes de una demostracion
+#  no exige los heaps grandes.
+# =============================================================================
+
+services:
+
+  # --------------------------------------------------------------- Zookeeper
+  # 128 MB basta: Zookeeper solo guarda metadatos del cluster (nodos, topicos,
+  # particiones), no mensajes. Su huella no crece con el trafico.
+  zk1:
+    environment:
+      KAFKA_HEAP_OPTS: -Xmx128m -Xms128m
+  zk2:
+    environment:
+      KAFKA_HEAP_OPTS: -Xmx128m -Xms128m
+  zk3:
+    environment:
+      KAFKA_HEAP_OPTS: -Xmx128m -Xms128m
+
+  # ------------------------------------------------------------------- Kafka
+  # 320 MB por broker en lugar de 512. El heap de Kafka no almacena los
+  # mensajes -eso vive en disco y en la cache de pagina del sistema-, asi que
+  # recortarlo afecta poco con el volumen de una demostracion.
+  kafka1:
+    environment:
+      KAFKA_HEAP_OPTS: -Xmx320m -Xms320m
+  kafka2:
+    environment:
+      KAFKA_HEAP_OPTS: -Xmx320m -Xms320m
+  kafka3:
+    environment:
+      KAFKA_HEAP_OPTS: -Xmx320m -Xms320m
+
+  kafka-ui:
+    environment:
+      JAVA_OPTS: -Xmx192m
+
+  # --------------------------------------------------------- Microservicios
+  # De 1.088 MB de heap sumado a 960. orders se lleva la porcion mayor porque
+  # es el unico que ademas publica a los dos sistemas de mensajeria.
+  orders:
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx224m -XX:MaxMetaspaceSize=112m
+  notify:
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx160m -XX:MaxMetaspaceSize=112m
+  audit:
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx160m -XX:MaxMetaspaceSize=112m
+  bff:
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:MaxMetaspaceSize=112m
+  rabbit-admin:
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx128m -XX:MaxMetaspaceSize=112m
+  kafka-admin:
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx128m -XX:MaxMetaspaceSize=112m

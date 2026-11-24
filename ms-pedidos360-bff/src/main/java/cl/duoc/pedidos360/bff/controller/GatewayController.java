@@ -34,17 +34,20 @@ public class GatewayController {
     private final WebClient auditWebClient;
     private final WebClient reportWebClient;
     private final WebClient rabbitAdminWebClient;
+    private final WebClient kafkaAdminWebClient;
 
     public GatewayController(@Qualifier("ordersWebClient") WebClient ordersWebClient,
                               @Qualifier("catalogWebClient") WebClient catalogWebClient,
                               @Qualifier("auditWebClient") WebClient auditWebClient,
                               @Qualifier("reportWebClient") WebClient reportWebClient,
-                              @Qualifier("rabbitAdminWebClient") WebClient rabbitAdminWebClient) {
+                              @Qualifier("rabbitAdminWebClient") WebClient rabbitAdminWebClient,
+                              @Qualifier("kafkaAdminWebClient") WebClient kafkaAdminWebClient) {
         this.ordersWebClient = ordersWebClient;
         this.catalogWebClient = catalogWebClient;
         this.auditWebClient = auditWebClient;
         this.reportWebClient = reportWebClient;
         this.rabbitAdminWebClient = rabbitAdminWebClient;
+        this.kafkaAdminWebClient = kafkaAdminWebClient;
     }
 
     @RequestMapping(value = "/orders/**", method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE})
@@ -71,6 +74,17 @@ public class GatewayController {
     @RequestMapping(value = "/rabbit/**", method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.DELETE})
     public Mono<ResponseEntity<String>> rabbit(HttpServletRequest request, @RequestBody(required = false) String body) {
         return proxy(rabbitAdminWebClient, "/rabbit", request, body);
+    }
+
+    /**
+     * Administracion de Kafka (topicos, configuraciones, consumer groups): solo
+     * Admin, ver SecurityConfig. Incluye PATCH porque cambiar la retencion o la
+     * politica de limpieza de un topico es una modificacion parcial.
+     */
+    @RequestMapping(value = "/kafka/**",
+            method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PATCH, RequestMethod.DELETE})
+    public Mono<ResponseEntity<String>> kafka(HttpServletRequest request, @RequestBody(required = false) String body) {
+        return proxy(kafkaAdminWebClient, "/kafka", request, body);
     }
 
     private Mono<ResponseEntity<String>> proxy(WebClient client, String prefix, HttpServletRequest request, String body) {
