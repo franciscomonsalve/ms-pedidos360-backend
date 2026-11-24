@@ -1,5 +1,5 @@
 # =============================================================================
-#  Overlay de memoria ajustada, para instancias de 4 GB (t3.medium).
+#  Overlay de memoria para los MICROSERVICIOS, en instancias de 4 GB.
 #
 #  POR QUE EXISTE
 #  El stack completo -3 Zookeeper, 3 brokers Kafka, Kafka UI, 2 nodos RabbitMQ,
@@ -36,37 +36,6 @@
 # =============================================================================
 
 services:
-
-  # --------------------------------------------------------------- Zookeeper
-  # 128 MB basta: Zookeeper solo guarda metadatos del cluster (nodos, topicos,
-  # particiones), no mensajes. Su huella no crece con el trafico.
-  zk1:
-    environment:
-      KAFKA_HEAP_OPTS: -Xmx128m -Xms128m
-  zk2:
-    environment:
-      KAFKA_HEAP_OPTS: -Xmx128m -Xms128m
-  zk3:
-    environment:
-      KAFKA_HEAP_OPTS: -Xmx128m -Xms128m
-
-  # ------------------------------------------------------------------- Kafka
-  # 320 MB por broker en lugar de 512. El heap de Kafka no almacena los
-  # mensajes -eso vive en disco y en la cache de pagina del sistema-, asi que
-  # recortarlo afecta poco con el volumen de una demostracion.
-  kafka1:
-    environment:
-      KAFKA_HEAP_OPTS: -Xmx320m -Xms320m
-  kafka2:
-    environment:
-      KAFKA_HEAP_OPTS: -Xmx320m -Xms320m
-  kafka3:
-    environment:
-      KAFKA_HEAP_OPTS: -Xmx320m -Xms320m
-
-  kafka-ui:
-    environment:
-      JAVA_OPTS: -Xmx192m
 
   # --------------------------------------------------------- Microservicios
   # De 1.088 MB de heap sumado a 960. orders se lleva la porcion mayor porque
