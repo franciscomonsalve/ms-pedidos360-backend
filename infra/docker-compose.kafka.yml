@@ -300,6 +300,27 @@ services:
       - "8090:8080"
     networks: [pedidos360-net]
 
+  # --------------------------------------------------- Override de kafka-admin
+  # kafka-admin se DEFINE en docker-compose.yml, pero su dependencia de los
+  # brokers se declara aqui y no alla, porque kafka1/2/3 solo existen en este
+  # archivo: ponerlo en el compose base lo dejaria invalido por si solo.
+  #
+  # POR QUE HACE FALTA
+  # Este servicio construye un AdminClient en un @Bean, y ese cliente resuelve
+  # los nombres de bootstrap.servers de forma INMEDIATA. Si arranca antes de que
+  # kafka1/2/3 existan en el DNS de Docker, muere con
+  # "No resolvable bootstrap urls given in bootstrap.servers" y el contenedor
+  # sale con codigo 1, sin reintentar.
+  #
+  # audit y notify no sufren esto porque los consumidores de Spring Kafka
+  # resuelven de forma perezosa y reintentan solos. Solo el AdminClient falla
+  # de golpe, y por eso solo el necesita esperar a que los brokers esten sanos.
+  kafka-admin:
+    depends_on:
+      kafka1: {condition: service_healthy}
+      kafka2: {condition: service_healthy}
+      kafka3: {condition: service_healthy}
+
 volumes:
   zk1-data:
   zk1-log:
