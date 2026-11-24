@@ -100,7 +100,9 @@ services:
       # cloud -> PostgreSQL en RDS: los pedidos persisten, pero si RDS no esta disponible
       #          el contenedor NO levanta. Se cambia en infra/.env (ORDERS_PROFILE).
       SPRING_PROFILES_ACTIVE: ${ORDERS_PROFILE:-dev}
-      DB_HOST: ${DB_HOST:-pedidos360-db.clslztcqqdgp.us-east-1.rds.amazonaws.com}
+      # Sin host por defecto: el anterior apuntaba a un RDS de un laboratorio ya
+      # reciclado, y un valor muerto por defecto hace creer que hay base cuando no.
+      DB_HOST: ${DB_HOST:-}
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-pedidos360_db}
       DB_USER: ${DB_USER:-postgres}
@@ -201,7 +203,16 @@ services:
       dockerfile: ms-pedidos360-audit/Dockerfile
     container_name: pedidos360-audit
     environment:
-      SPRING_PROFILES_ACTIVE: dev
+      # dev   -> H2 en memoria: la linea de tiempo se pierde al reiniciar.
+      # cloud -> PostgreSQL en RDS, la MISMA instancia que orders. Este servicio
+      #          es dueno de AUDIT_EVENTS; orders de PEDIDOS y PEDIDO_ITEMS.
+      #          Se cambia en infra/.env (AUDIT_PROFILE).
+      SPRING_PROFILES_ACTIVE: ${AUDIT_PROFILE:-dev}
+      DB_HOST: ${DB_HOST:-}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-pedidos360_db}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-}
       AZURE_TENANT_ID: ${AZURE_TENANT_ID:-f280f365-653c-4282-b1ee-200e91b01736}
       AZURE_API_CLIENT_ID: ${AZURE_API_CLIENT_ID:-08c770a5-21a6-4434-8d59-28723c7c759d}
       # Los tres brokers, por su nombre DENTRO de la red de Docker y por el
