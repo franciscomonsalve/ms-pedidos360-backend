@@ -60,12 +60,27 @@ spring:
   config:
     activate:
       on-profile: cloud
+  # PostgreSQL en RDS, el mismo motor y la misma instancia que usa orders.
+  #
+  # POR QUE CAMBIO DE ORACLE A POSTGRESQL
+  # Este perfil apuntaba a Oracle con ddl-auto: validate, pensado para una base
+  # con el esquema ya creado por fuera. En AWS Academy no hay RDS Oracle
+  # disponible, y mantener dos motores distintos obligaba a sostener dos
+  # dialectos y dos drivers para un servicio que solo escribe una tabla.
+  #
+  # Comparte la instancia con orders y no colisiona: orders es dueno de PEDIDOS
+  # y PEDIDO_ITEMS, este servicio de AUDIT_EVENTS.
   datasource:
-    url: jdbc:oracle:thin:@${DB_HOST:localhost}:${DB_PORT:1521}/${DB_SERVICE:ORCLPDB1}
-    driver-class-name: oracle.jdbc.OracleDriver
-    username: ${DB_USER:pedidos360}
-    password: ${DB_PASSWORD:changeme}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:pedidos360_db}?ssl=true&sslmode=require
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USER:postgres}
+    # Sin valor por defecto a proposito: si falta la variable el arranque falla
+    # de inmediato, en lugar de intentar conectarse con una clave de ejemplo.
+    password: ${DB_PASSWORD:}
   jpa:
-    database-platform: org.hibernate.dialect.OracleDialect
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
-      ddl-auto: validate
+      # update y no validate: Hibernate crea AUDIT_EVENTS en el primer arranque.
+      # La linea de tiempo deja de ser volatil y sobrevive a los reinicios del
+      # contenedor, que es justo lo que se muestra en /auditoria.
+      ddl-auto: update
